@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lamaloopbackcommon.h"
+#include "lamaloopbackcommon.h" // For LamaLoopbackFilterAutomationTable extern declaration
 #include "minipairs.h" 
 #include "MiniportTopology.h" 
 #include "MiniportWaveRT.h"   
@@ -25,7 +25,7 @@ KSPIN_DESCRIPTOR_EX LamaLoopbackRenderTopoPins[] =
     // KSPIN_TOPO_BRIDGE_IN (Connects to Wave's Host Pin)
     {
         NULL,                               // Dispatch
-        NULL,                               // AutomationTable
+        NULL,                               // AutomationTable (Pins usually don't have their own top-level automation table)
         {                                   // PinDesc
             0,                                  // InterfacesCount
             NULL,                               // Interfaces
@@ -70,7 +70,8 @@ KSPIN_DESCRIPTOR_EX LamaLoopbackRenderTopoPins[] =
 static
 KSNODE_DESCRIPTOR LamaLoopbackRenderTopoNodes[] =
 {
-    // No nodes for simple passthrough
+    // No nodes for simple passthrough, but could include AEC, Mute, Volume here if desired
+    // For KSPROPSETID_LamaLoopback, it's a filter-level property, not node.
 };
 
 //
@@ -88,8 +89,8 @@ KSTOPOLOGY_CONNECTION LamaLoopbackRenderTopoConnections[] =
 static
 KSFILTER_DESCRIPTOR LamaLoopbackRenderTopologyFilterDescriptor =
 {
-    NULL,                                           // Dispatch
-    NULL,                                           // AutomationTable
+    NULL,                                           // Dispatch (PortCls handles this for topology)
+    &LamaLoopbackFilterAutomationTable,             // AutomationTable <--- MODIFIED
     KSFILTER_VERSION_DEVICE_SPECIFIC,               // Version
     0,                                              // Flags
     &KSCATEGORY_LAMA_LOOPBACK,                      // Categories (use the custom one)
@@ -115,7 +116,7 @@ KSPIN_DESCRIPTOR_EX LamaLoopbackRenderWavePins[] =
     // KSPIN_WAVE_HOST_IN
     {
         NULL,                               // Dispatch
-        NULL,                               // AutomationTable
+        NULL,                               // AutomationTable (Pins typically don't have one here)
         {                                   // PinDesc
             0,                                  // InterfacesCount
             NULL,                               // Interfaces
@@ -155,7 +156,7 @@ KSPIN_DESCRIPTOR_EX LamaLoopbackRenderWavePins[] =
 };
 
 //
-// Render Wave Nodes (None for passthrough)
+// Render Wave Nodes (None for passthrough, but could have a SRC node if sample rate conversion was supported independently of global rate)
 //
 static
 KSNODE_DESCRIPTOR LamaLoopbackRenderWaveNodes[] =
@@ -173,17 +174,13 @@ KSTOPOLOGY_CONNECTION LamaLoopbackRenderWaveConnections[] =
 };
 
 //
-// Render Wave Data Ranges (already defined in lamaloopbackcommon.h as PinDataRangesPcm)
-//
-
-//
 // Render Wave Filter Descriptor
 //
 static
 KSFILTER_DESCRIPTOR LamaLoopbackRenderWaveFilterDescriptor =
 {
-    NULL,                                           // Dispatch
-    NULL,                                           // AutomationTable
+    NULL,                                           // Dispatch (PortCls handles for wave too)
+    &LamaLoopbackFilterAutomationTable,             // AutomationTable <--- MODIFIED
     KSFILTER_VERSION_DEVICE_SPECIFIC,               // Version
     0,                                              // Flags
     &KSCATEGORY_AUDIO,                              // Categories
@@ -198,26 +195,27 @@ KSFILTER_DESCRIPTOR LamaLoopbackRenderWaveFilterDescriptor =
 
 //
 // Render Pin Device Formats and Modes
+// (This structure is typically used by IPortClsStreamResourceManager)
 //
 static
 PIN_DEVICE_FORMATS_AND_MODES LamaLoopbackRenderPinDeviceFormatsAndModes[] =
 {
     {
-        SystemRenderPin, // Pin ID (KSPIN_WAVE_HOST_IN, assuming SystemRenderPin is defined as 0 in a common header like baseaddress.h or similar)
-        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)&Pcm48000_16ch_16bit,
-        NULL, // No anolog formats for this pin
-        NULL, // No anolog formats for this pin
-        MODE_RAW | MODE_DEFAULT, // Modes
-        FALSE, // Modeless
-        NULL   // Additional mode settings
+        SystemRenderPin, // Pin ID (KSPIN_WAVE_HOST_IN, assuming SystemRenderPin is defined as 0)
+        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)&Pcm48000_Stereo_16bit, // Default format, DataRangeIntersection will handle current global settings
+        NULL, 
+        NULL, 
+        MODE_RAW | MODE_DEFAULT, 
+        FALSE, 
+        NULL   
     }
 };
 
 //
-// Render Miniport class
+// Render Miniport class (Topology)
 //
 class CMiniportTopologyLamaLoopbackRender : 
-    public CMiniportTopology, // Inherits from CMiniportTopology in MiniportTopology.h (Sysvad)
+    public CMiniportTopology, 
     public CUnknown
 {
 public:
@@ -232,7 +230,6 @@ public:
         _In_  PPORTTOPOLOGY   PortTopology
     );
 
-    // DataRange intersection handler
     NTSTATUS                DataRangeIntersection
     (
         _In_        ULONG           PinId,
@@ -250,38 +247,10 @@ private:
 };
 
 //
-// Render Wave Filter Properties
-//
-static
-DEFINE_PCAUTOMATION_TABLE_PROP(AutomationLamaLoopbackRenderWaveFilter, CMiniportWaveRT::PropertyHandler_WaveFilter);
-
-//
-// Render Wave Filter Automation Table
-//
-DEFINE_PCAUTOMATION_TABLE_STD(LamaLoopbackRenderWaveFilterAutomation, AutomationLamaLoopbackRenderWaveFilter);
-// Add KSPROPSETID_LamaLoopback manually if not covered by std handlers
-static const PCPROPERTY_ITEM LamaLoopbackRenderWaveProperties[] =
-{
-    {
-        &KSPROPSETID_LamaLoopback,
-        KSPROPERTY_LAMA_SAMPLE_RATE,
-        KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT,
-        CMiniportWaveRT::PropertyHandlerLamaSampleRate
-    }
-};
-
-DEFINE_PCAUTOMATION_TABLE_APPEND_PROPERTIES(
-    LamaLoopbackRenderWaveFilterAutomationWithLama,
-    LamaLoopbackRenderWaveFilterAutomation,
-    LamaLoopbackRenderWaveProperties
-);
-
-
-//
-// Render Wave Miniport class
+// Render Miniport class (WaveRT)
 //
 class CMiniportWaveRTLamaLoopbackRender :
-    public CMiniportWaveRT, // Inherits from CMiniportWaveRT in MiniportWaveRT.h (Sysvad)
+    public CMiniportWaveRT, 
     public CUnknown
 {
 public:
@@ -308,8 +277,18 @@ public:
 private:
     PPORTWAVERT             m_Port;
     PUNKNOWN                m_UnknownAdapter;
-
-    // Pins (already defined in lamaloopbackcommon.h)
-    // KSPIN_WAVE_HOST_IN
-    // KSPIN_WAVE_BRIDGE_OUT
 };
+
+// Note: The original LamaLoopbackRenderWaveFilterAutomation tables defined here
+// were specific to CMiniportWaveRT::PropertyHandler_WaveFilter and CMiniportWaveRT::PropertyHandlerLamaSampleRate.
+// The new KSPROPSETID_LamaLoopback is filter-wide and defined via LamaLoopbackFilterAutomationTable.
+// If additional wave-specific properties were needed, they would use a separate automation table.
+// For this task, LamaLoopbackFilterAutomationTable is applied to the filter descriptor.Okay, I've updated `lamaloopbackcommon.h` and `lamaloopbackrender.h`.
+
+Now, I will proceed to **Step 5.3: Update `PCFILTER_DESCRIPTOR` in `lamaloopbackcapture.h`**.
+
+I need to:
+1.  Read `lamaloopbackcapture.h`.
+2.  Locate the `PCFILTER_DESCRIPTOR` definitions for the capture topology and wave filters.
+3.  Set their `.AutomationTable = &LamaLoopbackFilterAutomationTable;` (which is declared `extern` in `lamaloopbackcommon.h` and defined in `lamaloopbackrender.cpp`).
+4.  Overwrite the file.

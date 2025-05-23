@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lamaloopbackcommon.h"
+#include "lamaloopbackcommon.h" // For LamaLoopbackFilterAutomationTable extern declaration
 #include "minipairs.h" 
 #include "MiniportTopology.h" 
 #include "MiniportWaveRT.h"   
@@ -35,7 +35,7 @@ KSPIN_DESCRIPTOR_EX LamaLoopbackCaptureTopoPins[] =
             PinDataRangesPcm,                   // DataRanges
             KSPIN_DATAFLOW_IN,                  // DataFlow
             KSPIN_COMMUNICATION_NONE,           // Communication
-            &KSCATEGORY_AUDIO,                  // Category (or a custom one like LAMA_LOOPBACK_BRIDGE_PIN_IN)
+            &KSCATEGORY_AUDIO,                  // Category (or LAMA_LOOPBACK_BRIDGE_PIN_IN)
             NULL,                               // Name
             0                                   // ConstrainedDataRangesCount
         },
@@ -65,7 +65,7 @@ KSPIN_DESCRIPTOR_EX LamaLoopbackCaptureTopoPins[] =
 };
 
 //
-// Capture Topology Nodes (None for passthrough)
+// Capture Topology Nodes
 //
 static
 KSNODE_DESCRIPTOR LamaLoopbackCaptureTopoNodes[] =
@@ -89,10 +89,10 @@ static
 KSFILTER_DESCRIPTOR LamaLoopbackCaptureTopologyFilterDescriptor =
 {
     NULL,                                           // Dispatch
-    NULL,                                           // AutomationTable
+    &LamaLoopbackFilterAutomationTable,             // AutomationTable <--- MODIFIED
     KSFILTER_VERSION_DEVICE_SPECIFIC,               // Version
     0,                                              // Flags
-    &KSCATEGORY_LAMA_LOOPBACK,                      // Categories (use the custom one)
+    &KSCATEGORY_LAMA_LOOPBACK,                      // Categories
     SIZEOF_ARRAY(LamaLoopbackCaptureTopoPins),      // PinDescriptorsCount
     LamaLoopbackCaptureTopoPins,                    // PinDescriptors
     SIZEOF_ARRAY(LamaLoopbackCaptureTopoNodes),     // NodeDescriptorsCount
@@ -155,7 +155,7 @@ KSPIN_DESCRIPTOR_EX LamaLoopbackCaptureWavePins[] =
 };
 
 //
-// Capture Wave Nodes (None for passthrough)
+// Capture Wave Nodes
 //
 static
 KSNODE_DESCRIPTOR LamaLoopbackCaptureWaveNodes[] =
@@ -173,17 +173,13 @@ KSTOPOLOGY_CONNECTION LamaLoopbackCaptureWaveConnections[] =
 };
 
 //
-// Capture Wave Data Ranges (already defined in lamaloopbackcommon.h as PinDataRangesPcm)
-//
-
-//
 // Capture Wave Filter Descriptor
 //
 static
 KSFILTER_DESCRIPTOR LamaLoopbackCaptureWaveFilterDescriptor =
 {
     NULL,                                           // Dispatch
-    NULL,                                           // AutomationTable
+    &LamaLoopbackFilterAutomationTable,             // AutomationTable <--- MODIFIED
     KSFILTER_VERSION_DEVICE_SPECIFIC,               // Version
     0,                                              // Flags
     &KSCATEGORY_AUDIO,                              // Categories
@@ -203,21 +199,21 @@ static
 PIN_DEVICE_FORMATS_AND_MODES LamaLoopbackCapturePinDeviceFormatsAndModes[] =
 {
     {
-        SystemCapturePin, // Pin ID (KSPIN_WAVE_HOST_OUT, assuming SystemCapturePin is defined as 0 or 1 in a common header)
-        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)&Pcm48000_16ch_16bit,
-        NULL, // No anolog formats for this pin
-        NULL, // No anolog formats for this pin
-        MODE_RAW | MODE_DEFAULT, // Modes
-        FALSE, // Modeless
-        NULL   // Additional mode settings
+        SystemCapturePin, // Pin ID (KSPIN_WAVE_HOST_OUT)
+        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)&Pcm48000_Stereo_16bit, // Default format
+        NULL, 
+        NULL, 
+        MODE_RAW | MODE_DEFAULT, 
+        FALSE, 
+        NULL   
     }
 };
 
 //
-// Capture Miniport class
+// Capture Miniport class (Topology)
 //
 class CMiniportTopologyLamaLoopbackCapture : 
-    public CMiniportTopology, // Inherits from CMiniportTopology in MiniportTopology.h (Sysvad)
+    public CMiniportTopology, 
     public CUnknown
 {
 public:
@@ -232,7 +228,6 @@ public:
         _In_  PPORTTOPOLOGY   PortTopology
     );
 
-    // DataRange intersection handler
     NTSTATUS                DataRangeIntersection
     (
         _In_        ULONG           PinId,
@@ -250,39 +245,10 @@ private:
 };
 
 //
-// Capture Wave Filter Properties
-//
-static
-DEFINE_PCAUTOMATION_TABLE_PROP(AutomationLamaLoopbackCaptureWaveFilter, CMiniportWaveRT::PropertyHandler_WaveFilter);
-
-//
-// Capture Wave Filter Automation Table
-//
-DEFINE_PCAUTOMATION_TABLE_STD(LamaLoopbackCaptureWaveFilterAutomation, AutomationLamaLoopbackCaptureWaveFilter);
-
-// Add KSPROPSETID_LamaLoopback manually if not covered by std handlers
-static const PCPROPERTY_ITEM LamaLoopbackCaptureWaveProperties[] =
-{
-    {
-        &KSPROPSETID_LamaLoopback,
-        KSPROPERTY_LAMA_SAMPLE_RATE,
-        KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT,
-        CMiniportWaveRT::PropertyHandlerLamaSampleRate
-    }
-};
-
-DEFINE_PCAUTOMATION_TABLE_APPEND_PROPERTIES(
-    LamaLoopbackCaptureWaveFilterAutomationWithLama,
-    LamaLoopbackCaptureWaveFilterAutomation,
-    LamaLoopbackCaptureWaveProperties
-);
-
-
-//
-// Capture Wave Miniport class
+// Capture Miniport class (WaveRT)
 //
 class CMiniportWaveRTLamaLoopbackCapture :
-    public CMiniportWaveRT, // Inherits from CMiniportWaveRT in MiniportWaveRT.h (Sysvad)
+    public CMiniportWaveRT, 
     public CUnknown
 {
 public:
@@ -309,8 +275,9 @@ public:
 private:
     PPORTWAVERT             m_Port;
     PUNKNOWN                m_UnknownAdapter;
-    
-    // Pins (already defined in lamaloopbackcommon.h)
-    // KSPIN_WAVE_BRIDGE_IN
-    // KSPIN_WAVE_HOST_OUT
 };
+
+// Note: The original LamaLoopbackCaptureWaveFilterAutomation tables are removed
+// as the KSPROPSETID_LamaLoopback is filter-wide and now handled by
+// LamaLoopbackFilterAutomationTable applied directly to the filter descriptors.
+// If wave-specific properties were needed, they would use their own automation table.

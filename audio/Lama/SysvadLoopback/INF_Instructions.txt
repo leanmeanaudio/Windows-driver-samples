@@ -1,0 +1,133 @@
+Instructions for Creating 4 Lama Loopback Driver Instances
+===========================================================
+
+This guide explains how to modify the 'lamafiltertemplate.inf' file to install up to 4 instances of the Lama Loopback Audio Device. Each instance will appear as a separate audio device in Windows.
+
+**IMPORTANT:**
+*   Backup your original `lamafiltertemplate.inf` before making any changes.
+*   You will need to install each instance manually using Device Manager and these modified INF sections.
+*   The `DriverVer` in the `[Version]` section of the INF should ideally be updated each time you make significant changes to the driver or INF to ensure Windows picks up the new version.
+
+**Steps:**
+
+1.  **Open `lamafiltertemplate.inf` in a text editor.**
+
+2.  **Modify the `[Manufacturer]` and `[Microsoft.NT$ARCH$]` sections:**
+    You will define 4 different device descriptions and Hardware IDs.
+
+    Replace the existing `[Microsoft.NT$ARCH$]` section:
+    ```inf
+    ; Original line:
+    ; %LamaLoopback.DeviceDesc% = LamaLoopback_Device, Root\LamaLoopbackAudio 
+    ```
+    With these lines:
+    ```inf
+    %LamaLoopback.DeviceDesc0% = LamaLoopback_Device0, Root\LamaLoopbackAudio0
+    %LamaLoopback.DeviceDesc1% = LamaLoopback_Device1, Root\LamaLoopbackAudio1
+    %LamaLoopback.DeviceDesc2% = LamaLoopback_Device2, Root\LamaLoopbackAudio2
+    %LamaLoopback.DeviceDesc3% = LamaLoopback_Device3, Root\LamaLoopbackAudio3
+    ```
+
+3.  **Create Device Sections for Each Instance:**
+    You will need to duplicate and modify the main device installation section for each of the 4 instances.
+    The original section is likely named `[LamaLoopback_Device.NT]` (or similar based on your INF).
+
+    Create four new sections like this, changing the `0` to `1`, `2`, and `3` for each subsequent section:
+
+    ```inf
+    [LamaLoopback_Device0.NT]
+    Include=ks.inf,wdmaudio.inf
+    Needs=KS.Registration,WDMAUDIO.Registration
+    CopyFiles=LamaLoopback.CopyList_Instance0
+    AddReg=LamaLoopback.AddReg_Instance0
+    DeviceID=Root\LamaLoopbackAudio0 ; Custom property for identification by application if needed
+
+    [LamaLoopback_Device0.NT.Services]
+    AddService = LamaLoopback0, %SPSVCINST_ASSOCSERVICE%, LamaLoopback.ServiceInstall_Instance0
+
+    [LamaLoopback.ServiceInstall_Instance0]
+    DisplayName    = %LamaLoopback.SvcDesc0%
+    ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+    StartType      = 3                  ; SERVICE_DEMAND_START
+    ErrorControl   = 1                  ; SERVICE_ERROR_NORMAL
+    ServiceBinary  = %12%\lamaloopback.sys ; Path to your driver .sys file
+    ```
+    **Repeat this for `LamaLoopback_Device1.NT`**, `LamaLoopback_Device2.NT`, and `LamaLoopback_Device3.NT`.
+    Make sure to change:
+    *   `LamaLoopback_Device0.NT` to `LamaLoopback_Device1.NT`, etc.
+    *   `CopyFiles=LamaLoopback.CopyList_Instance0` to `CopyFiles=LamaLoopback.CopyList_Instance1`, etc. (if you have instance-specific files, otherwise they can share `LamaLoopback.CopyList`).
+    *   `AddReg=LamaLoopback.AddReg_Instance0` to `AddReg=LamaLoopback.AddReg_Instance1`, etc. (see step 4 for AddReg details).
+    *   `DeviceID=Root\LamaLoopbackAudio0` to `DeviceID=Root\LamaLoopbackAudio1`, etc. (This is an example of a custom registry value, not a standard INF directive for hardware ID matching for root enumerated devices, but can be useful).
+    *   In `[LamaLoopback_DeviceX.NT.Services]`: `AddService = LamaLoopback0, ... LamaLoopback.ServiceInstall_Instance0` to `AddService = LamaLoopback1, ... LamaLoopback.ServiceInstall_Instance1`, etc.
+    *   In `[LamaLoopback.ServiceInstall_InstanceX]`: `DisplayName = %LamaLoopback.SvcDesc0%` to `DisplayName = %LamaLoopback.SvcDesc1%`, etc.
+
+4.  **Create `CopyFiles` and `AddReg` Sections for Each Instance (if needed):**
+    *   **`CopyFiles`**: If your driver uses the *exact same* .sys file for all instances, they can all reference the same `CopyFiles` section (e.g., `LamaLoopback.CopyList`).
+        If you had different .sys files per instance (unlikely for this scenario), you'd define `LamaLoopback.CopyList_Instance0`, `LamaLoopback.CopyList_Instance1`, etc.
+        Example (shared CopyFiles):
+        ```inf
+        [LamaLoopback.CopyList]
+        lamaloopback.sys
+        ```
+        Ensure your `[LamaLoopback_DeviceX.NT]` sections point to the correct `CopyFiles` list.
+
+    *   **`AddReg`**: This is important for giving each device instance unique properties, especially the "FriendlyName".
+        Create sections like this for each instance (0 through 3):
+        ```inf
+        [LamaLoopback.AddReg_Instance0]
+        HKR,"FriendlyName",,%LamaLoopback.DeviceDesc0%
+        HKR,,DeviceInterfaceGUIDs,0x00010008,"{E5A8C3E6-9C7A-4BEB-9158-130E70805F47}" ; Example Interface GUID from common.h
+        HKR,,InstanceIndex,0x00010001,0 ; Add custom registry key for instance index 0
+        ; You can add other HKR entries as needed, for example, to set default formats or properties.
+
+        [LamaLoopback.AddReg_Instance1]
+        HKR,"FriendlyName",,%LamaLoopback.DeviceDesc1%
+        HKR,,DeviceInterfaceGUIDs,0x00010008,"{E5A8C3E6-9C7A-4BEB-9158-130E70805F47}" ; Same Interface GUID
+        HKR,,InstanceIndex,0x00010001,1 ; Add custom registry key for instance index 1
+
+        [LamaLoopback.AddReg_Instance2]
+        HKR,"FriendlyName",,%LamaLoopback.DeviceDesc2%
+        HKR,,DeviceInterfaceGUIDs,0x00010008,"{E5A8C3E6-9C7A-4BEB-9158-130E70805F47}"
+        HKR,,InstanceIndex,0x00010001,2 
+
+        [LamaLoopback.AddReg_Instance3]
+        HKR,"FriendlyName",,%LamaLoopback.DeviceDesc3%
+        HKR,,DeviceInterfaceGUIDs,0x00010008,"{E5A8C3E6-9C7A-4BEB-9158-130E70805F47}"
+        HKR,,InstanceIndex,0x00010001,3
+        ```
+        The `DeviceInterfaceGUIDs` entry uses the `KSCATEGORY_LAMA_LOOPBACK` GUID defined in your `lamaloopbackcommon.h`. This helps applications find the device instances. The `InstanceIndex` is a custom value the JUCE app can query.
+
+5.  **Update the `[Strings]` section:**
+    Add unique descriptions for each device instance and its service.
+    ```inf
+    [Strings]
+    MSFT = "Your Company Name" ; Change as appropriate
+    LamaLoopback.DeviceDesc0 = "Lama Loopback Audio Device (Instance 0)"
+    LamaLoopback.SvcDesc0    = "Lama Loopback Audio Device Driver (Instance 0)"
+    LamaLoopback.DeviceDesc1 = "Lama Loopback Audio Device (Instance 1)"
+    LamaLoopback.SvcDesc1    = "Lama Loopback Audio Device Driver (Instance 1)"
+    LamaLoopback.DeviceDesc2 = "Lama Loopback Audio Device (Instance 2)"
+    LamaLoopback.SvcDesc2    = "Lama Loopback Audio Device Driver (Instance 2)"
+    LamaLoopback.DeviceDesc3 = "Lama Loopback Audio Device (Instance 3)"
+    SvcDesc3    = "Lama Loopback Audio Device Driver (Instance 3)"
+    SPSVCINST_ASSOCSERVICE = 0x00000002
+    ```
+    Ensure your `[LamaLoopback.ServiceInstall_InstanceX]` sections use `%LamaLoopback.SvcDescX%` and your `[Microsoft.NT$ARCH$]` section uses `%LamaLoopback.DeviceDescX%`.
+
+6.  **Installation:**
+    *   For each instance (0 to 3), you will need to manually install the driver:
+        *   Open Device Manager.
+        *   Select "Action" -> "Add legacy hardware".
+        *   Choose "Install the hardware that I manually select from a list (Advanced)".
+        *   Select "Show All Devices" or "Sound, video and game controllers".
+        *   Click "Have Disk..." and browse to your modified INF file.
+        *   You should see "Lama Loopback Audio Device (Instance 0)", "Lama Loopback Audio Device (Instance 1)", etc. Select the desired one and complete the installation.
+        *   Repeat for each instance you want to install. You will point to the same INF file each time but select a different instance from the list.
+
+**Notes:**
+*   The Hardware IDs `Root\LamaLoopbackAudio0`, `Root\LamaLoopbackAudio1`, etc., are for a root-enumerated device. This means Windows doesn't automatically detect it; you have to add it manually via "Add legacy hardware".
+*   The `ServiceBinary` path should point to where your `lamaloopback.sys` file will be copied (usually `System32\drivers`).
+*   The `DeviceInterfaceGUIDs` registry key with `KSCATEGORY_LAMA_LOOPBACK` allows applications like your JUCE plugin or the test application to find these specific driver instances using standard SetupAPI calls (e.g., `SetupDiGetClassDevs` with the interface GUID). The custom `InstanceIndex` registry value provides another way for the application to distinguish them if it reads this value after opening the device.
+
+This modified INF structure should allow you to install and use up to 4 instances of your loopback driver.
+```
