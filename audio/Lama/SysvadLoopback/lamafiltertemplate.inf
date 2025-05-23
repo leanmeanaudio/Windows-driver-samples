@@ -1,0 +1,51 @@
+; lamafiltertemplate.inf
+;
+; Installation INF for the Lama Loopback Audio Device
+;
+; Copyright (c) Microsoft Corporation. All rights reserved.
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=MEDIA
+ClassGuid={4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider=%MSFT%
+DriverVer= ; TODO: Set date and version
+CatalogFile=lamafiltertemplate.cat ; TODO: Update with actual catalog file name
+
+[Manufacturer]
+%MSFT%=Microsoft,NT$ARCH$
+
+[Microsoft.NT$ARCH$]
+%LamaLoopback.DeviceDesc% = LamaLoopback_Device, Root\LamaLoopbackAudio ; TODO: Update with actual hardware ID
+
+[LamaLoopback_Device.NT]
+Include=ks.inf,wdmaudio.inf
+Needs=KS.Registration,WDMAUDIO.Registration
+CopyFiles=LamaLoopback.CopyList
+AddReg=LamaLoopback.AddReg
+
+[LamaLoopback.CopyList]
+; TODO: List driver files to be copied, e.g., lamaloopback.sys
+; lamaloopback.sys
+
+[LamaLoopback.AddReg]
+; TODO: Add necessary registry entries
+; Example:
+; HKR,"Settings",DeviceSpecificSetting,0x00010001,1
+
+[LamaLoopback_Device.NT.Services]
+AddService = LamaLoopback, %SPSVCINST_ASSOCSERVICE%, LamaLoopback.ServiceInstall
+
+[LamaLoopback.ServiceInstall]
+DisplayName    = %LamaLoopback.SvcDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 3                  ; SERVICE_DEMAND_START
+ErrorControl   = 1                  ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\lamaloopback.sys ; TODO: Update with actual driver file name
+
+[Strings]
+MSFT = "Microsoft"
+LamaLoopback.DeviceDesc = "Lama Loopback Audio Device"
+LamaLoopback.SvcDesc = "Lama Loopback Audio Device Driver"
+SPSVCINST_ASSOCSERVICE = 0x00000002

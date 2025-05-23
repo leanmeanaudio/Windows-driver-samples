@@ -35,8 +35,7 @@ Abstract:
 #ifdef SYSVAD_A2DP_SIDEBAND
 #include "a2dphpminipairs.h"
 #endif // SYSVAD_A2DP_SIDEBAND
-
-
+#include "Lama/SysvadLoopback/lamaloopbackminipairs.h" // Include Lama Loopback minipairs
 
 
 typedef void (*fnPcDriverUnload) (PDRIVER_OBJECT);
@@ -246,12 +245,33 @@ _Dispatch_type_(IRP_MJ_PNP)
 DRIVER_DISPATCH PnpHandler;
 
 //
-// Rendering streams are not saved to a file by default. Use the registry value 
-// DoNotCreateDataFiles (DWORD) = 0 to override this default.
+// Array of miniport pairs. This is the static list of all miniports supported 
+// by this driver.
 //
-DWORD g_DoNotCreateDataFiles = 1;  // default is off.
-DWORD g_DisableToneGenerator = 0;  // default is to generate tones.
-UNICODE_STRING g_RegistryPath;      // This is used to store the registry settings path for the driver
+PENDPOINT_MINIPAIR g_RenderEndpoints[] =
+{
+    &SpeakerMiniports,          // Speaker (front)
+    &SpeakerHsMiniports,        // Speaker (handset)
+    &HdmiSpeakerMiniports,      // Speaker (hdmi)
+    &SpdifSpeakerMiniports,     // Speaker (spdif)
+    &LamaLoopbackRenderMiniportPair // Lama Loopback Render
+};
+ULONG g_cRenderEndpoints = SIZEOF_ARRAY(g_RenderEndpoints);
+
+PENDPOINT_MINIPAIR g_CaptureEndpoints[] =
+{
+    &MicArrayMiniports,         // Mic array (front)
+    &MicArray2Miniports,        // Mic array (top)
+    &MicArray3Miniports,        // Mic array (back)
+    &MicInMiniports,            // MicIn
+    &FmRxMiniports,             // FM Rx
+    &LineInMiniports,           // Line In
+    &LamaLoopbackCaptureMiniportPair // Lama Loopback Capture
+};
+ULONG g_cCaptureEndpoints = SIZEOF_ARRAY(g_CaptureEndpoints);
+
+// Maximum number of miniports for this adapter.
+ULONG g_MaxMiniports = SIZEOF_ARRAY(g_RenderEndpoints) + SIZEOF_ARRAY(g_CaptureEndpoints);
 
 
 #ifdef SYSVAD_BTH_BYPASS
@@ -261,6 +281,14 @@ UNICODE_STRING g_RegistryPath;      // This is used to store the registry settin
 // this default.
 //
 DWORD g_DisableBthScoBypass = 0;   // default is SCO bypass enabled.
+
+PENDPOINT_MINIPAIR g_BthHfpEndpoints[] =
+{
+    &BthHfpSpeakerMiniports,
+    &BthHfpMicMiniports
+};
+ULONG g_cBthHfpEndpoints = SIZEOF_ARRAY(g_BthHfpEndpoints);
+ULONG g_MaxBthHfpMiniports = SIZEOF_ARRAY(g_BthHfpEndpoints);
 #endif // SYSVAD_BTH_BYPASS
 
 #ifdef SYSVAD_USB_SIDEBAND
@@ -270,6 +298,14 @@ DWORD g_DisableBthScoBypass = 0;   // default is SCO bypass enabled.
 // this default.
 //
 DWORD g_DisableUsbSideband = 0;   // default is USB bypass enabled.
+
+PENDPOINT_MINIPAIR g_UsbHsEndpoints[] =
+{
+    &UsbHsSpeakerMiniports,
+    &UsbHsMicMiniports
+};
+ULONG g_cUsbHsEndpoints = SIZEOF_ARRAY(g_UsbHsEndpoints);
+ULONG g_MaxUsbHsMiniports = SIZEOF_ARRAY(g_UsbHsEndpoints);
 #endif // SYSVAD_USB_SIDEBAND
 
 #ifdef SYSVAD_A2DP_SIDEBAND
@@ -279,7 +315,22 @@ DWORD g_DisableUsbSideband = 0;   // default is USB bypass enabled.
 // this default.
 //
 DWORD g_DisableA2dpSideband = 0; // default is A2DP bypass enabled.
-#endif
+
+PENDPOINT_MINIPAIR g_A2dpHpEndpoints[] =
+{
+    &A2dpHpSpeakerMiniports
+};
+ULONG g_cA2dpHpEndpoints = SIZEOF_ARRAY(g_A2dpHpEndpoints);
+ULONG g_MaxA2dpHpMiniports = SIZEOF_ARRAY(g_A2dpHpEndpoints);
+#endif // SYSVAD_A2DP_SIDEBAND
+
+//
+// Rendering streams are not saved to a file by default. Use the registry value 
+// DoNotCreateDataFiles (DWORD) = 0 to override this default.
+//
+DWORD g_DoNotCreateDataFiles = 1;  // default is off.
+DWORD g_DisableToneGenerator = 0;  // default is to generate tones.
+UNICODE_STRING g_RegistryPath;      // This is used to store the registry settings path for the driver
 
 //-----------------------------------------------------------------------------
 // Functions
@@ -437,6 +488,9 @@ Returns:
 #ifdef SYSVAD_USB_SIDEBAND
         { NULL,   RTL_QUERY_REGISTRY_DIRECT | RTL_QUERY_REGISTRY_TYPECHECK, L"DisableUsbSideband",  &g_DisableUsbSideband,  (REG_DWORD << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT) | REG_DWORD, &g_DisableUsbSideband,  sizeof(ULONG)},
 #endif // SYSVAD_USB_SIDEBAND
+#ifdef SYSVAD_A2DP_SIDEBAND
+        { NULL,   RTL_QUERY_REGISTRY_DIRECT | RTL_QUERY_REGISTRY_TYPECHECK, L"DisableA2dpSideband", &g_DisableA2dpSideband, (REG_DWORD << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT) | REG_DWORD, &g_DisableA2dpSideband, sizeof(ULONG)},
+#endif // SYSVAD_A2DP_SIDEBAND
         { NULL,   0,                                                        NULL,                    NULL,                    0,                                                             NULL,                    0}
     };
 
@@ -483,6 +537,10 @@ Returns:
 #ifdef SYSVAD_USB_SIDEBAND
     DPF(D_VERBOSE, ("DisableUsbSideband: %u", g_DisableUsbSideband));
 #endif // SYSVAD_USB_SIDEBAND
+#ifdef SYSVAD_A2DP_SIDEBAND
+    DPF(D_VERBOSE, ("DisableA2dpSideband: %u", g_DisableA2dpSideband));
+#endif // SYSVAD_A2DP_SIDEBAND
+
 
     if (DriverKey)
     {
@@ -662,6 +720,10 @@ Return Value:
 #ifdef SYSVAD_USB_SIDEBAND
     maxObjects += g_MaxUsbHsMiniports; 
 #endif // SYSVAD_USB_SIDEBAND
+#ifdef SYSVAD_A2DP_SIDEBAND
+    maxObjects += g_MaxA2dpHpMiniports;
+#endif // SYSVAD_A2DP_SIDEBAND
+
 
     // Tell the class driver to add the device.
     //
@@ -1117,7 +1179,7 @@ Return Value:
         ntStatus = pAdapterCommon->InitA2dpSideband();
         IF_FAILED_JUMP(ntStatus, Exit);
     }
-#endif
+#endif //SYSVAD_A2DP_SIDEBAND
 
 #ifdef _USE_SingleComponentMultiFxStates
     //
@@ -1248,5 +1310,3 @@ Return Value:
 }
 
 #pragma code_seg()
-
-

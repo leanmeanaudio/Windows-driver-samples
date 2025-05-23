@@ -6,6 +6,10 @@
 #include "minwavertstream.h"
 #include "UnittestData.h"
 #include "AudioModuleHelper.h"
+// Include Lama Loopback headers for pin definitions if not already globally available via sysvad.h or common.h
+#include "Lama/SysvadLoopback/lamaloopbackrender.h" // For KSPIN_WAVE_HOST_IN (Render)
+#include "Lama/SysvadLoopback/lamaloopbackcapture.h"// For KSPIN_WAVE_HOST_OUT (Capture)
+
 #define MINWAVERTSTREAM_POOLTAG 'SRWM'
 
 #pragma warning (disable : 4127)
@@ -250,6 +254,11 @@ Return Value:
     m_pAudioModules = NULL;
     m_AudioModuleCount = 0;
 
+    m_pLamaLoopbackBuffer = NULL; // Initialize Lama members
+    m_isLamaLoopbackRender = FALSE;
+    m_isLamaLoopbackCapture = FALSE;
+
+
     m_ulHostCaptureToneFrequency = IsEqualGUID(SignalProcessingMode, AUDIO_SIGNALPROCESSINGMODE_RAW) ? 1000 : 2000;
     m_ulLoopbackCaptureToneFrequency = 3000; // 3 kHz
     m_dwHostCaptureToneAmplitude = 50; 
@@ -294,6 +303,19 @@ Return Value:
         return STATUS_INVALID_PARAMETER;
     }
     m_pMiniport->AddRef();
+    // Get AdapterCommon from the miniport.
+    PADAPTERCOMMON adapterCommon = m_pMiniport->GetAdapterCommObj();
+    if (adapterCommon == NULL)
+    {
+        // Should not happen.
+        m_pMiniport->Release();
+        m_pMiniport = NULL;
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+    // Get the shared buffer from AdapterCommon
+    m_pLamaLoopbackBuffer = adapterCommon->pLamaLoopbackBuffer; // This was added to CAdapterCommon
+
+
     if (!NT_SUCCESS(ntStatus))
     {
         return ntStatus;
@@ -301,6 +323,17 @@ Return Value:
     m_ulPin = Pin_;
     m_bCapture = Capture_;
     m_ulDmaMovementRate = pWfEx->nAvgBytesPerSec;
+
+    // Determine if this is a Lama Loopback stream
+    if (m_pMiniport->m_DeviceType == eLamaLoopbackRenderDevice && m_ulPin == KSPIN_WAVE_HOST_IN)
+    {
+        m_isLamaLoopbackRender = TRUE;
+    }
+    else if (m_pMiniport->m_DeviceType == eLamaLoopbackCaptureDevice && m_ulPin == KSPIN_WAVE_HOST_OUT)
+    {
+        m_isLamaLoopbackCapture = TRUE;
+    }
+
 
     m_pDpc = (PRKDPC)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(KDPC), MINWAVERTSTREAM_POOLTAG);
     if (!m_pDpc)
@@ -344,7 +377,7 @@ Return Value:
         return ntStatus;
     }
 
-    if (m_bCapture)
+    if (m_bCapture && !m_isLamaLoopbackCapture) // Only init tone generator if NOT lama loopback capture
     {
         ReadRegistrySettings();
             DWORD toneFrequency = 0;
@@ -414,7 +447,7 @@ Return Value:
             return ntStatus;
         }
     }
-    else if (!g_DoNotCreateDataFiles)
+    else if (!m_bCapture && !g_DoNotCreateDataFiles && !m_isLamaLoopbackRender) // Only init save data if NOT lama loopback render
     {
         //
         // Create an output file for the render data.
@@ -551,7 +584,7 @@ NTSTATUS CMiniportWaveRTStream::AllocateBufferWithNotification
 
     RequestedSize_ -= RequestedSize_ % (m_pWfExt->Format.nBlockAlign);
     
-    if (!m_bCapture && !g_DoNotCreateDataFiles)
+    if (!m_bCapture && !g_DoNotCreateDataFiles && !m_isLamaLoopbackRender)
     {
         NTSTATUS ntStatus;
         
@@ -1209,10 +1242,17 @@ NTSTATUS CMiniportWaveRTStream::SetState
             m_bEoSReceived = FALSE;
             m_bLastBufferRendered = FALSE;
 
+            // Reset Lama Loopback pointers
+            if (m_pLamaLoopbackBuffer) 
+            {
+                m_pLamaLoopbackBuffer->ulReadPointer = 0;
+                m_pLamaLoopbackBuffer->ulWritePointer = 0;
+            }
+
             KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
 
             // Wait until all work items are completed.
-            if (!m_bCapture && !g_DoNotCreateDataFiles)
+            if (!m_bCapture && !g_DoNotCreateDataFiles && !m_isLamaLoopbackRender)
             {
                 m_SaveData.WaitAllWorkItems();
             }
@@ -1427,12 +1467,96 @@ VOID CMiniportWaveRTStream::UpdatePosition
 
     if (m_bCapture)
     {
-        // Write sine wave to buffer.
-        WriteBytes(ByteDisplacement);
+        // Handle Lama Loopback Capture or standard tone generation
+        if (m_isLamaLoopbackCapture && m_pLamaLoopbackBuffer && m_pLamaLoopbackBuffer->pBuffer)
+        {
+            // This function is called by the PortCls to get captured data.
+            // So, we read from the loopback buffer and write to the DMA buffer (m_pDmaBuffer).
+            KIRQL oldIrql;
+            KeAcquireSpinLock(&m_pLamaLoopbackBuffer->SpinLock, &oldIrql);
+
+            ULONG readPointer = m_pLamaLoopbackBuffer->ulReadPointer;
+            ULONG writePointer = m_pLamaLoopbackBuffer->ulWritePointer;
+            ULONG loopbackBufferSize = m_pLamaLoopbackBuffer->ulBufferSize;
+            BYTE* loopbackBuffer = m_pLamaLoopbackBuffer->pBuffer;
+            
+            ULONG bytesAvailableInLoopback;
+            if (writePointer >= readPointer)
+            {
+                bytesAvailableInLoopback = writePointer - readPointer;
+            }
+            else
+            {
+                bytesAvailableInLoopback = (loopbackBufferSize - readPointer) + writePointer;
+            }
+
+            ULONG bytesToCopy = min(ByteDisplacement, bytesAvailableInLoopback);
+            ULONG destinationBufferOffset = m_ullLinearPosition % m_ulDmaBufferSize; // Where to write in OS buffer
+
+            // Copy data from loopback buffer to OS buffer
+            for (ULONG i = 0; i < bytesToCopy; ++i)
+            {
+                m_pDmaBuffer[destinationBufferOffset] = loopbackBuffer[readPointer];
+                destinationBufferOffset = (destinationBufferOffset + 1) % m_ulDmaBufferSize;
+                readPointer = (readPointer + 1) % loopbackBufferSize;
+            }
+            
+            // If not enough data in loopback, fill with silence
+            if (bytesToCopy < ByteDisplacement)
+            {
+                RtlZeroMemory(m_pDmaBuffer + destinationBufferOffset, ByteDisplacement - bytesToCopy);
+            }
+
+            m_pLamaLoopbackBuffer->ulReadPointer = readPointer;
+            KeReleaseSpinLock(&m_pLamaLoopbackBuffer->SpinLock, oldIrql);
+        }
+        else
+        {
+            // Standard capture: Write sine wave to buffer.
+            WriteBytes(ByteDisplacement);
+        }
     }
-    else
+    else // Render path
     {
-        if (m_bEoSReceived)
+        if (m_isLamaLoopbackRender && m_pLamaLoopbackBuffer && m_pLamaLoopbackBuffer->pBuffer)
+        {
+            // This function is called by PortCls to provide data to be rendered.
+            // So, we read from the DMA buffer (m_pDmaBuffer) and write to the loopback buffer.
+            KIRQL oldIrql;
+            ULONG sourceBufferOffset = m_ullLinearPosition % m_ulDmaBufferSize; // Where to read from OS buffer
+            
+            KeAcquireSpinLock(&m_pLamaLoopbackBuffer->SpinLock, &oldIrql);
+            ULONG readPointer = m_pLamaLoopbackBuffer->ulReadPointer;
+            ULONG writePointer = m_pLamaLoopbackBuffer->ulWritePointer;
+            ULONG loopbackBufferSize = m_pLamaLoopbackBuffer->ulBufferSize;
+            BYTE* loopbackBuffer = m_pLamaLoopbackBuffer->pBuffer;
+
+            ULONG freeSpaceInLoopback;
+            if (readPointer > writePointer)
+            {
+                freeSpaceInLoopback = readPointer - writePointer -1; // -1 to prevent write == read when full
+            }
+            else
+            {
+                 freeSpaceInLoopback = (loopbackBufferSize - writePointer) + readPointer -1;
+            }
+            // Ensure there's always at least one byte empty to distinguish full from empty
+            if (freeSpaceInLoopback == 0 && loopbackBufferSize > 0) freeSpaceInLoopback = loopbackBufferSize -1;
+
+
+            ULONG bytesToWriteToLoopback = min(ByteDisplacement, freeSpaceInLoopback);
+
+            for (ULONG i = 0; i < bytesToWriteToLoopback; ++i)
+            {
+                loopbackBuffer[writePointer] = m_pDmaBuffer[sourceBufferOffset];
+                writePointer = (writePointer + 1) % loopbackBufferSize;
+                sourceBufferOffset = (sourceBufferOffset + 1) % m_ulDmaBufferSize;
+            }
+            m_pLamaLoopbackBuffer->ulWritePointer = writePointer;
+            KeReleaseSpinLock(&m_pLamaLoopbackBuffer->SpinLock, oldIrql);
+            // If ByteDisplacement > bytesToWriteToLoopback, data is dropped (loopback buffer full)
+        }
+        else if (m_bEoSReceived)
         {
             // since EoS flag is set, we'll need to make sure not to read data beyond EOS position.
             // If driver's current position is less than EoS position, then make sure not to read data beyond EoS.
@@ -1469,7 +1593,7 @@ VOID CMiniportWaveRTStream::UpdatePosition
                                         0);
         }
 
-        if (!g_DoNotCreateDataFiles)
+        if (!g_DoNotCreateDataFiles && !m_isLamaLoopbackRender) // Don't save data for lama loopback render
         {
             // Read from buffer and write to a file.
             ReadBytes(ByteDisplacement);
@@ -1509,17 +1633,25 @@ ByteDisplacement - # of bytes to process.
 
 --*/
 {
-    ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
-
-    // Normally this will loop no more than once for a single wrap, but if
-    // many bytes have been displaced then this may loops many times.
-    while (ByteDisplacement > 0)
+    // This function is called by UpdatePosition for CAPTURE streams.
+    // If it's a Lama Loopback Capture stream, data is already read from the shared buffer
+    // into m_pDmaBuffer within UpdatePosition.
+    // If it's NOT a Lama Loopback Capture stream, then generate tone.
+    if (!m_isLamaLoopbackCapture) 
     {
-        ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
+        ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
+
+        // Normally this will loop no more than once for a single wrap, but if
+        // many bytes have been displaced then this may loops many times.
+        while (ByteDisplacement > 0)
+        {
+            ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
             m_ToneGenerator.GenerateSine(m_pDmaBuffer + bufferOffset, runWrite);
-        bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
-        ByteDisplacement -= runWrite;
+            bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
+            ByteDisplacement -= runWrite;
+        }
     }
+    // For Lama Loopback Capture, m_pDmaBuffer has already been filled by UpdatePosition.
 }
 
 //=============================================================================
@@ -1533,6 +1665,7 @@ VOID CMiniportWaveRTStream::ReadBytes
 Routine Description:
 
 This function reads the audio buffer and saves the data in a file.
+For Lama Loopback Render, it writes data to the shared loopback buffer.
 
 Arguments:
 
@@ -1540,16 +1673,25 @@ ByteDisplacement - # of bytes to process.
 
 --*/
 {
-    ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
-
-    // Normally this will loop no more than once for a single wrap, but if
-    // many bytes have been displaced then this may loops many times.
-    while (ByteDisplacement > 0)
+    // This function is called by UpdatePosition for RENDER streams.
+    if (m_isLamaLoopbackRender)
     {
-        ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);
-        bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
-        ByteDisplacement -= runWrite;
+        // Data has already been written to the shared loopback buffer within UpdatePosition.
+        // No further action needed here for the loopback case.
+    }
+    else if (!g_DoNotCreateDataFiles) // Standard render: save to file
+    {
+        ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
+
+        // Normally this will loop no more than once for a single wrap, but if
+        // many bytes have been displaced then this may loops many times.
+        while (ByteDisplacement > 0)
+        {
+            ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
+            m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);
+            bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
+            ByteDisplacement -= runWrite;
+        }
     }
 }
 
@@ -1605,7 +1747,11 @@ Return Value:
     // SYSVAD writes each stream seperately to disk. If the rights for this
     // stream indicates that the stream is CopyProtected, stop writing to disk.
     //
-    m_SaveData.Disable(drmRights->CopyProtect);
+    if (!m_isLamaLoopbackRender) // Don't interact with SaveData if it's a Lama loopback render stream
+    {
+        m_SaveData.Disable(drmRights->CopyProtect);
+    }
+
 
     //
     // From MSDN:
@@ -1854,4 +2000,30 @@ End:
 }
 //=============================================================================
 
+// Dummy implementations for AllocateBuffer/FreeBuffer as they are not used by WaveRT but declared in the class
+#pragma code_seg("PAGE")
+NTSTATUS CMiniportWaveRTStream::AllocateBuffer
+(
+    _In_    ULONG                   BufferSize,
+    _Out_   PMDL                   *Mdl,
+    _Out_   PVOID                  *BufferAddress
+)
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(BufferSize);
+    UNREFERENCED_PARAMETER(Mdl);
+    UNREFERENCED_PARAMETER(BufferAddress);
+    return STATUS_NOT_IMPLEMENTED;
+}
 
+#pragma code_seg("PAGE")
+VOID CMiniportWaveRTStream::FreeBuffer
+(
+    _In_opt_ PMDL        Mdl,
+    _In_opt_ PVOID       BufferAddress
+)
+{
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(Mdl);
+    UNREFERENCED_PARAMETER(BufferAddress);
+}

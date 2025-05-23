@@ -17,6 +17,7 @@ Abstract:
 
 #include "savedata.h"
 #include "tonegenerator.h"
+#include "Lama/SysvadLoopback/lamaloopbackcommon.h" // For LAMA_SHARED_LOOPBACK_BUFFER
 
 
 //
@@ -61,6 +62,11 @@ protected:
     ULONG                       m_ulCurrentWritePosition;
     LONG                        m_IsCurrentWritePositionUpdated;
     
+    // Lama Loopback members
+    LAMA_SHARED_LOOPBACK_BUFFER* m_pLamaLoopbackBuffer; 
+    BOOL                        m_isLamaLoopbackRender; 
+    BOOL                        m_isLamaLoopbackCapture;
+
 public:
     DECLARE_STD_UNKNOWN();
     DEFINE_STD_CONSTRUCTOR(CMiniportWaveRTStream);
@@ -89,7 +95,7 @@ public:
     friend class                CMiniportWaveRT;
     friend EXT_CALLBACK         TimerNotifyRT;
 protected:
-    CMiniportWaveRT*            m_pMiniport;
+    CMiniportWaveRT*            m_pMiniport; // Member variable of current class
     ULONG                       m_ulPin;
     BOOLEAN                     m_bCapture;
     BOOLEAN                     m_bUnregisterStream;
@@ -220,6 +226,10 @@ public:
     (
         _In_  ULONG ulCurrentWritePosition
     );
+
+    // Lama Loopback specific methods (declarations)
+    NTSTATUS AllocateBuffer(ULONG BufferSize, PMDL *Mdl, PVOID *BufferAddress);
+    VOID FreeBuffer(PMDL Mdl, PVOID BufferAddress);
     
     public:
     NTSTATUS SetLoopbackProtection
@@ -316,5 +326,3 @@ private:
 };
 typedef CMiniportWaveRTStream *PCMiniportWaveRTStream;
 #endif // _SYSVAD_MINWAVERTSTREAM_H_
-
-

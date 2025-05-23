@@ -20,6 +20,7 @@ Abstract:
 #include "savedata.h"
 #include "IHVPrivatePropertySet.h"
 #include "simple.h"
+#include "Lama/SysvadLoopback/lamaloopbackcommon.h" // For LAMA_SHARED_LOOPBACK_BUFFER
 
 #ifdef SYSVAD_BTH_BYPASS
 #include <limits.h>
@@ -99,6 +100,8 @@ class CAdapterCommon :
 #endif//SYSVAD_USB_SIDEBAND
 
     public:
+        LAMA_SHARED_LOOPBACK_BUFFER*    pLamaLoopbackBuffer;    // Shared buffer for Lama Loopback
+
         //=====================================================================
         // Default CUnknown
         DECLARE_STD_UNKNOWN();
@@ -650,6 +653,18 @@ Return Value:
         m_WdfDevice = NULL;
     }
 
+    // Free Lama Loopback Buffer
+    if (pLamaLoopbackBuffer)
+    {
+        if (pLamaLoopbackBuffer->pBuffer)
+        {
+            ExFreePoolWithTag(pLamaLoopbackBuffer->pBuffer, MINADAPTER_POOLTAG);
+            pLamaLoopbackBuffer->pBuffer = NULL;
+        }
+        ExFreePoolWithTag(pLamaLoopbackBuffer, MINADAPTER_POOLTAG);
+        pLamaLoopbackBuffer = NULL;
+    }
+
     InterlockedDecrement(&CAdapterCommon::m_AdapterInstances);
     ASSERT(CAdapterCommon::m_AdapterInstances == 0);
 #ifdef SYSVAD_USB_SIDEBAND
@@ -788,6 +803,7 @@ Return Value:
     m_PowerState            = PowerDeviceD0;
     m_pHW                   = NULL;
     m_pPortClsEtwHelper     = NULL;
+    pLamaLoopbackBuffer     = NULL; // Initialize Lama Loopback Buffer pointer
 
     InitializeListHead(&m_SubdeviceCache);
 
@@ -838,6 +854,36 @@ Return Value:
     // Initialize SaveData class.
     //
     CSaveData::SetDeviceObject(DeviceObject);   //device object is needed by CSaveData
+
+    //
+    // Initialize Lama Loopback Buffer
+    //
+    pLamaLoopbackBuffer = (PLAMA_SHARED_LOOPBACK_BUFFER)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(LAMA_SHARED_LOOPBACK_BUFFER), MINADAPTER_POOLTAG);
+    if (!pLamaLoopbackBuffer)
+    {
+        DPF(D_TERSE, ("Insufficient memory for Lama Loopback Buffer metadata"));
+        ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+        goto Done;
+    }
+    RtlZeroMemory(pLamaLoopbackBuffer, sizeof(LAMA_SHARED_LOOPBACK_BUFFER));
+
+    pLamaLoopbackBuffer->pBuffer = (PBYTE)ExAllocatePool2(POOL_FLAG_NON_PAGED, LAMA_LOOPBACK_BUFFER_SIZE, MINADAPTER_POOLTAG);
+    if (!pLamaLoopbackBuffer->pBuffer)
+    {
+        DPF(D_TERSE, ("Insufficient memory for Lama Loopback Buffer data"));
+        ExFreePoolWithTag(pLamaLoopbackBuffer, MINADAPTER_POOLTAG);
+        pLamaLoopbackBuffer = NULL;
+        ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+        goto Done;
+    }
+    RtlZeroMemory(pLamaLoopbackBuffer->pBuffer, LAMA_LOOPBACK_BUFFER_SIZE);
+    pLamaLoopbackBuffer->ulBufferSize = LAMA_LOOPBACK_BUFFER_SIZE;
+    pLamaLoopbackBuffer->ulReadPointer = 0;
+    pLamaLoopbackBuffer->ulWritePointer = 0;
+    KeInitializeSpinLock(&pLamaLoopbackBuffer->SpinLock);
+    pLamaLoopbackBuffer->pAssociatedDeviceObject = m_pDeviceObject;
+
+
 Done:
 
     return ntStatus;
@@ -5112,3 +5158,5 @@ CAdapterCommon::NotifyEndpointPair
     return ntStatus;
 }
 
+
+[end of audio/sysvad/common.cpp]

@@ -134,6 +134,30 @@ typedef enum {
     CONNECTIONTYPE_WAVE_OUTPUT     = 1
 } CONNECTIONTYPE;
 
+// Enum of device types. Used by CAdapterCommon::Init
+typedef enum
+{
+    eHdmiDevice = 0,
+    eSpeakerDevice,
+    eSpeakerHsDevice,
+    eMicArrayDevice1,
+    eMicArrayDevice2,
+    eMicArrayDevice3,
+    eFMRxDevice,
+    eFMTxDevice,
+    eBthHfpSpeakerDevice,
+    eBthHfpMicDevice,
+    eBthA2dpDevice,
+    eSpdifDevice,
+    eUsbHsSpeakerDevice,
+    eUsbHsMicDevice,
+    eMicInDevice,
+    eLineInDevice,
+    eLamaLoopbackRenderDevice, // New Lama Loopback Render Device
+    eLamaLoopbackCaptureDevice,// New Lama Loopback Capture Device
+    eMaxDeviceType           // Max device type. All new devices should be added before this.
+} eDeviceType;
+
 // Connection table for registering topology/wave bridge connection
 typedef struct _PHYSICALCONNECTIONTABLE
 {
@@ -209,7 +233,7 @@ NTSTATUS PropertyHandler_GenericPin
 );
 
 // common.h uses some of the above definitions.
-#include "common.h"
+// #include "common.h" // This is usually included by files needing it, common.h includes sysvad.h
 #include "kshelper.h"
 
 #endif

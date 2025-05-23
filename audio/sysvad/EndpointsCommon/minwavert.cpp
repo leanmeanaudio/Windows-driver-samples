@@ -24,6 +24,7 @@ Abstract:
 #include "minwavertstream.h"
 #include "IHVPrivatePropertySet.h"
 #include "AudioModuleHelper.h"
+#include "Lama/SysvadLoopback/lamaloopbackcommon.h" // For Lama Loopback definitions
 
 
 #define EFFECTS_LIST_COUNT 2
@@ -292,11 +293,17 @@ Arguments:
         return STATUS_BUFFER_TOO_SMALL;
     }
 
-    // Verify channel count is supported. This routine assumes a separate data
-    // range for each supported channel count.
-    if (((PKSDATARANGE_AUDIO)MyDataRange)->MaximumChannels != ((PKSDATARANGE_AUDIO)ClientDataRange)->MaximumChannels)
+    // For Lama Loopback, the sample rate is dynamic, so we can't rely on static MyDataRange.
+    // IsFormatSupported will handle the detailed check.
+    // For other devices, the original channel check remains.
+    if (!(m_DeviceType == eLamaLoopbackRenderDevice || m_DeviceType == eLamaLoopbackCaptureDevice))
     {
-        return STATUS_NO_MATCH;
+        // Verify channel count is supported. This routine assumes a separate data
+        // range for each supported channel count.
+        if (((PKSDATARANGE_AUDIO)MyDataRange)->MaximumChannels != ((PKSDATARANGE_AUDIO)ClientDataRange)->MaximumChannels)
+        {
+            return STATUS_NO_MATCH;
+        }
     }
     
     //
@@ -404,6 +411,11 @@ Return Value:
     m_ulMixDrmContentId                 = 0;
     m_LoopbackProtection                = CONSTRICTOR_OPTION_DISABLE;
     RtlZeroMemory(&m_MixDrmRights, sizeof(m_MixDrmRights));
+
+    // Initialize Lama Loopback specific members
+    m_currentSampleRate = 48000; // Default sample rate
+    RtlCopyMemory(&m_dynamicFormat16ch, &Pcm48000_16ch_16bit, sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE));
+
 
     // 
     // For port notification support.
@@ -996,6 +1008,16 @@ VOID CMiniportWaveRT::ReleaseFormatsAndModesLock()
 _Use_decl_annotations_
 ULONG CMiniportWaveRT::GetPinSupportedDeviceFormats(_In_ ULONG PinId, _Outptr_opt_result_buffer_(return) KSDATAFORMAT_WAVEFORMATEXTENSIBLE **ppFormats)
 {
+    // For Lama Loopback, return the dynamic format.
+    if (m_DeviceType == eLamaLoopbackRenderDevice || m_DeviceType == eLamaLoopbackCaptureDevice)
+    {
+        if (ppFormats != NULL)
+        {
+            *ppFormats = &m_dynamicFormat16ch;
+        }
+        return 1; // Only one dynamic format
+    }
+    
     PPIN_DEVICE_FORMATS_AND_MODES pDeviceFormatsAndModes = NULL;
 
     AcquireFormatsAndModesLock();
@@ -1349,104 +1371,6 @@ CMiniportWaveRT::StreamClosed
 //=============================================================================
 #pragma code_seg("PAGE")
 NTSTATUS
-CMiniportWaveRT::GetAttributesFromAttributeList
-(
-    _In_ const KSMULTIPLE_ITEM *_pAttributes,
-    _In_ size_t _Size,
-    _Out_ GUID* _pSignalProcessingMode
-)
-/*++
-
-Routine Description:
-
-  Processes attributes list and return known attributes.
-
-Arguments:
-
-  _pAttributes - pointer to KSMULTIPLE_ITEM at head of an attributes list.
-
-  _Size - count of bytes in the buffer pointed to by _pAttributes. The routine
-    verifies sufficient buffer size while processing the attributes.
-
-  _pSignalProcessingMode - returns the signal processing mode extracted from
-    the attribute list, or AUDIO_SIGNALPROCESSINGMODE_DEFAULT if the attribute
-    is not present in the list.
-
-Return Value:
-
-  NT status code.
-
-Remarks
-
-    This function is currently written for a single supported attribute
-    (KSATTRIBUTEID_AUDIOSIGNALPROCESSING_MODE). As additional attributes are defined in the future,
-    this function should be rewritten to be data driven through tables, etc.
-
---*/
-{
-    PAGED_CODE();
-    
-    DPF_ENTER(("[CMiniportWaveRT::GetAttributesFromAttributeList]"));
-
-    size_t cbRemaining = _Size;
-
-    *_pSignalProcessingMode = AUDIO_SIGNALPROCESSINGMODE_DEFAULT;
-
-    if (cbRemaining < sizeof(KSMULTIPLE_ITEM))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-    cbRemaining -= sizeof(KSMULTIPLE_ITEM);
-
-    //
-    // Extract attributes.
-    //
-    PKSATTRIBUTE attributeHeader = (PKSATTRIBUTE)(_pAttributes + 1);
-
-    for (ULONG i = 0; i < _pAttributes->Count; i++)
-    {
-        if (cbRemaining < sizeof(KSATTRIBUTE))
-        {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        if (attributeHeader->Attribute == KSATTRIBUTEID_AUDIOSIGNALPROCESSING_MODE)
-        {
-            KSATTRIBUTE_AUDIOSIGNALPROCESSING_MODE* signalProcessingModeAttribute;
-
-            if (cbRemaining < sizeof(KSATTRIBUTE_AUDIOSIGNALPROCESSING_MODE))
-            {
-                return STATUS_INVALID_PARAMETER;
-            }
-
-            if (attributeHeader->Size != sizeof(KSATTRIBUTE_AUDIOSIGNALPROCESSING_MODE))
-            {
-                return STATUS_INVALID_PARAMETER;
-            }
-
-            signalProcessingModeAttribute = (KSATTRIBUTE_AUDIOSIGNALPROCESSING_MODE*)attributeHeader;
-
-            // Return mode to caller.
-            *_pSignalProcessingMode = signalProcessingModeAttribute->SignalProcessingMode;
-        }
-        else
-        {
-            return STATUS_NOT_SUPPORTED;
-        }
-
-        // Adjust pointer and buffer size to next attribute (QWORD aligned)
-        ULONG cbAttribute = ((attributeHeader->Size + FILE_QUAD_ALIGNMENT) & ~FILE_QUAD_ALIGNMENT);
-
-        attributeHeader = (PKSATTRIBUTE) (((PBYTE)attributeHeader) + cbAttribute);
-        cbRemaining -= cbAttribute;
-    }
-
-    return STATUS_SUCCESS;
-}
-
-//=============================================================================
-#pragma code_seg("PAGE")
-NTSTATUS
 CMiniportWaveRT::IsFormatSupported
 (
     _In_ ULONG          _ulPin,
@@ -1469,7 +1393,17 @@ CMiniportWaveRT::IsFormatSupported
         return STATUS_INVALID_PARAMETER;
     }
 
-    cPinFormats = GetPinSupportedDeviceFormats(_ulPin, &pPinFormats);
+    // For Lama Loopback, use the dynamic format.
+    if (m_DeviceType == eLamaLoopbackRenderDevice || m_DeviceType == eLamaLoopbackCaptureDevice)
+    {
+        pPinFormats = &m_dynamicFormat16ch;
+        cPinFormats = 1;
+    }
+    else
+    {
+        cPinFormats = GetPinSupportedDeviceFormats(_ulPin, &pPinFormats);
+    }
+
 
     for (UINT iFormat = 0; iFormat < cPinFormats; iFormat++)
     {
@@ -1973,7 +1907,7 @@ CMiniportWaveRT::PropertyHandlerModulesListRequest
     _In_ PPCPROPERTY_REQUEST      PropertyRequest
 )
 {
-    // This specific APO->driver communication example is mainly added to show how this communication is done.
+    // This specific APO->driver communication example is mainly added to show to this communication is done.
     // The module list only lives on the wave filter and it can have modules that are for all pins and some that 
     // are only on specific pins.
 
@@ -2201,7 +2135,14 @@ CMiniportWaveRT::PropertyHandlerProposedFormat2
     //
     // Compute output data buffer.
     //
-    cbMinSize = modeInfo->DefaultFormat->FormatSize;
+    if (m_DeviceType == eLamaLoopbackRenderDevice || m_DeviceType == eLamaLoopbackCaptureDevice)
+    {
+        cbMinSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE); // Size of our dynamic format
+    }
+    else
+    {
+        cbMinSize = modeInfo->DefaultFormat->FormatSize;
+    }
     cbMinSize = (cbMinSize + 7) & ~7;
 
     pKsItemsHeaderOut = (PKSMULTIPLE_ITEM)((PBYTE)PropertyRequest->Value + cbMinSize);
@@ -2242,7 +2183,16 @@ CMiniportWaveRT::PropertyHandlerProposedFormat2
     }
 
     // Copy the proposed default format.
-    RtlCopyMemory(PropertyRequest->Value, modeInfo->DefaultFormat, modeInfo->DefaultFormat->FormatSize);
+    if (m_DeviceType == eLamaLoopbackRenderDevice || m_DeviceType == eLamaLoopbackCaptureDevice)
+    {
+        RtlCopyMemory(PropertyRequest->Value, &m_dynamicFormat16ch, sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE));
+        ((PKSDATAFORMAT)PropertyRequest->Value)->FormatSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
+    }
+    else
+    {
+        RtlCopyMemory(PropertyRequest->Value, modeInfo->DefaultFormat, modeInfo->DefaultFormat->FormatSize);
+    }
+
 
     // Copy back the attribute list.
     ASSERT(cbItemsList > 0);
@@ -2254,898 +2204,11 @@ CMiniportWaveRT::PropertyHandlerProposedFormat2
     return STATUS_SUCCESS;
 } // PropertyHandlerProposedFormat
 
-//=============================================================================
-#pragma code_seg("PAGE")
-NTSTATUS
-CMiniportWaveRT::PropertyHandlerEffectListRequest
-(
-    _In_ PPCPROPERTY_REQUEST      PropertyRequest
-)
-{
-    GUID StreamEffectList[] =
-    {
-        AUDIO_EFFECT_TYPE_LOUDNESS_EQUALIZER,
-        AUDIO_EFFECT_TYPE_VIRTUAL_SURROUND
-    };
-
-    PAGED_CODE();
-
-    DPF_ENTER(("[CMiniportWaveRT::PropertyHandlerEffectListRequest]"));
-
-    // This specific APO->driver communication example is mainly added to show to this communication is done.
-    // It skips the pin id validation and returns pin specific answers to the caller, which a real miniport 
-    // audio driver probably needs to take care of.
-
-    // Handle KSPROPERTY_TYPE_BASICSUPPORT query
-    if (PropertyRequest->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
-    {
-        return PropertyHandler_BasicSupport(PropertyRequest, PropertyRequest->PropertyItem->Flags, VT_ILLEGAL);
-    }
-
-    // Verify instance data stores at least KSP_PIN fields beyond KSPPROPERTY.
-    if (PropertyRequest->InstanceSize < (sizeof(KSP_PIN) - RTL_SIZEOF_THROUGH_FIELD(KSP_PIN, Property)))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    if (PropertyRequest->Verb & KSPROPERTY_TYPE_GET)
-    {
-        PKSMULTIPLE_ITEM ksMultipleItem;
-        ULONG ulEffectsCount = ARRAYSIZE(StreamEffectList);
-        ULONG cbMinSize;
-        LPGUID pEffectGuids = NULL;
-
-        // Compute min value size requirements    
-        cbMinSize = sizeof(KSMULTIPLE_ITEM) + ulEffectsCount * sizeof(GUID);
-
-        // Verify value size
-        if (PropertyRequest->ValueSize == 0)
-        {
-            PropertyRequest->ValueSize = cbMinSize;
-            return STATUS_BUFFER_OVERFLOW;
-        }
-        if (PropertyRequest->ValueSize < cbMinSize)
-        {
-            return STATUS_BUFFER_TOO_SMALL;
-        }
-        // Value is a KSMULTIPLE_ITEM followed by list of GUIDs.
-        ksMultipleItem = (PKSMULTIPLE_ITEM)PropertyRequest->Value;
-        pEffectGuids = (LPGUID)(ksMultipleItem + 1);
-
-        // Copy effect guid 
-        RtlCopyMemory(pEffectGuids, StreamEffectList, ulEffectsCount * sizeof(GUID));
-
-        // Miniport filled in the list of GUIDs. Fill in the KSMULTIPLE_ITEM header.
-        ksMultipleItem->Size = sizeof(KSMULTIPLE_ITEM) + ulEffectsCount * sizeof(GUID);
-        ksMultipleItem->Count = ulEffectsCount;
-
-        PropertyRequest->ValueSize = ksMultipleItem->Size;
-        return STATUS_SUCCESS;
-    }
-
-    return STATUS_INVALID_DEVICE_REQUEST;
-
-} // PropertyHandlerEffectListRequest
 
 //=============================================================================
 #pragma code_seg("PAGE")
 NTSTATUS
-CMiniportWaveRT::UpdateDrmRights
-(
-    void
-)
-/*++
-
-Routine Description:
-
-  Updates the mixed DrmRights. This is done by creating an array of existing
-  content ids and asking DrmPort to create a new contend id with a mixed
-  DrmRights structure.
-  The new DrmRights structure should be enforced, if everything goes well.
-
-Arguments:
-
-Return Value:
-
-  NT status code.
-
---*/
-{
-    PAGED_CODE();
-
-    DPF_ENTER(("[CMiniportWaveRT::UpdateDrmRights]"));
-    
-    NTSTATUS        ntStatus                = STATUS_UNSUCCESSFUL;
-    ULONG           ulMixDrmContentId       = 0;
-    BOOL            fCreatedContentId       = FALSE;
-    DRMRIGHTS       MixDrmRights            = {FALSE, 0, FALSE};
-    ULONG           ulContentIndex          = 0;
-    ULONG*          ulContentIds            = NULL;
-
-    //
-    // This function only runs if IID_DrmPort is implemented in Wave port.
-    //
-    if (!m_pDrmPort)
-    {
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    ulContentIds = new (POOL_FLAG_NON_PAGED, MINWAVERT_POOLTAG) ULONG[m_ulMaxSystemStreams + m_ulMaxOffloadStreams];
-    if (!ulContentIds)
-    {
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-
-    //
-    // Create an array of all StreamIds.
-    //
-    for (ULONG i = 0; i < m_ulMaxSystemStreams; i++)
-    {
-        if (m_SystemStreams[i])
-        {
-            ulContentIds[ulContentIndex] = m_SystemStreams[i]->m_ulContentId;
-            ulContentIndex++;
-        }
-    }
-
-    for (ULONG i = 0; i < m_ulMaxOffloadStreams; i++)
-    {
-        ASSERT(IsOffloadSupported());
-        
-        if (m_OffloadStreams[i])
-        {
-            ulContentIds[ulContentIndex] = m_OffloadStreams[i]->m_ulContentId;
-            ulContentIndex++;
-        }
-    }
-
-    //
-    // Create the new contentId.
-    //
-    if (ulContentIndex)
-    {
-        ntStatus = 
-            m_pDrmPort->CreateContentMixed
-            (
-                ulContentIds,
-                ulContentIndex,
-                &ulMixDrmContentId
-            );
-        
-        if (NT_SUCCESS(ntStatus))
-        {
-            fCreatedContentId = TRUE;
-            ntStatus = 
-                m_pDrmPort->GetContentRights
-                (
-                    ulMixDrmContentId, 
-                    &MixDrmRights
-                );
-        }
-    }
-
-    //
-    // If successful, destroy the old ContentId and update global rights.
-    //
-    if (NT_SUCCESS(ntStatus))
-    {
-        m_pDrmPort->DestroyContent(m_ulMixDrmContentId);
-        m_ulMixDrmContentId = ulMixDrmContentId;
-        RtlCopyMemory(&m_MixDrmRights, &MixDrmRights, sizeof(m_MixDrmRights));
-
-        //
-        // At this point the driver should enforce the new DrmRights.
-        // The sample driver handles DrmRights per stream basis, and 
-        // stops writing the stream to disk, if CopyProtect = TRUE.
-        //
-
-        //
-        // If DigitalOutputDisable or CopyProtect is true, enable HDCP
-        // 
-        if (m_DeviceType == eHdmiRenderDevice &&
-            (m_MixDrmRights.DigitalOutputDisable || m_MixDrmRights.CopyProtect))
-        {
-            // Enable HDCP here.
-        }
-    } 
-
-    //
-    // Cleanup if failed
-    // 
-    if (!NT_SUCCESS(ntStatus) && fCreatedContentId)
-    {
-        m_pDrmPort->DestroyContent(ulMixDrmContentId);
-    }
-
-    //
-    // Free allocated memory.
-    //
-    ASSERT(ulContentIds);
-    delete [] ulContentIds;
-    ulContentIds = NULL;
-
-    return ntStatus;
-} // UpdateDrmRights
-
-//=============================================================================
-#pragma code_seg("PAGE")
-NTSTATUS
-CMiniportWaveRT::AllocStreamAudioModules
-(
-    _In_  const GUID *      SignalProcessingMode,
-    _Out_ AUDIOMODULE **    ppAudioModules,
-    _Out_ ULONG *           pAudioModuleCount
-)
-{
-    NTSTATUS        ntStatus = STATUS_INVALID_DEVICE_STATE;
-    AUDIOMODULE *   pAudioModules = NULL;
-    ULONG           cModules = 0;    
-    ULONG           i, j;
-    size_t          size;
-
-    PAGED_CODE();
-    
-    //
-    // Init out parameters.
-    //
-    *ppAudioModules = NULL;
-    *pAudioModuleCount = 0;
-
-    //
-    // Nothing to do if there are no modules.
-    //
-    if (m_pAudioModules == NULL)
-    {
-        ntStatus = STATUS_SUCCESS;
-        goto exit;
-    }
-    
-    //
-    // Find the # of modules associated with this stream.
-    //
-    for (i=0; i<GetAudioModuleListCount(); ++i)
-    {
-        const AUDIOMODULE_DESCRIPTOR * moduleDesc = m_pAudioModules[i].Descriptor;
-        
-        if (IsEqualGUIDAligned(*moduleDesc->ProcessingMode, *SignalProcessingMode) ||
-            IsEqualGUIDAligned(*moduleDesc->ProcessingMode, NULL_GUID))
-        {
-            cModules++;
-        }
-    }
-
-    //
-    // All done if module count is zero.
-    //
-    if (cModules == 0)
-    {
-        ntStatus = STATUS_SUCCESS;
-        goto exit;
-    }
-
-    //
-    // Alloc modules infrastructure.
-    //
-    size = cModules * sizeof(AUDIOMODULE);
-#pragma prefast(suppress:__WARNING_MEMORY_LEAK,"No leaking, stream obj dtor calls FreeStreamAudioModules")
-    pAudioModules = (AUDIOMODULE *)ExAllocatePool2(POOL_FLAG_NON_PAGED, size, MINWAVERT_POOLTAG);
-    if (pAudioModules == NULL)
-    {
-        ntStatus = STATUS_INSUFFICIENT_RESOURCES;
-        goto exit;
-    }
-    
-    for (i=0, j=0; i<GetAudioModuleListCount() && j<cModules; ++i)
-    {
-        const AUDIOMODULE_DESCRIPTOR * moduleDesc = m_pAudioModules[i].Descriptor;
-    
-        if (IsEqualGUIDAligned(*moduleDesc->ProcessingMode, *SignalProcessingMode) ||
-            IsEqualGUIDAligned(*moduleDesc->ProcessingMode, NULL_GUID))
-        {
-            ULONG CfgInstanceId;
-            
-            //
-            // Init run-time module element.
-            //
-            pAudioModules[j].Descriptor = moduleDesc;
-            pAudioModules[j].Context    = NULL;
-
-            //
-            // Create a unique InstanceId for this module instance.
-            // This sample uses 24bits index which wraps around after 16M 
-            // module instances for a specific class ID/Class config id. 
-            // A real driver should reuse instance ids of deleted module
-            // instances, i.e., the driver should use a mapping between 
-            // index <--> module info.
-            //
-            CfgInstanceId = InterlockedIncrement((LONG*)&m_pAudioModules[i].NextCfgInstanceId);
-            
-            pAudioModules[j].InstanceId = 
-                AUDIOMODULE_INSTANCE_ID(AUDIOMODULE_GET_CLASSCFGID(m_pAudioModules[i].InstanceId),
-                                        CfgInstanceId);
-                                        
-            pAudioModules[j].Enabled = m_pAudioModules[i].Enabled;
-        
-            //
-            // Alloc context for module instance.
-            //
-            size = moduleDesc->ContextSize;
-            if (size)
-            {
-#pragma prefast(suppress:__WARNING_MEMORY_LEAK,"No leaking, stream obj dtor calls FreeStreamAudioModules")
-                pAudioModules[j].Context = 
-                    ExAllocatePool2(POOL_FLAG_NON_PAGED, size, MINWAVERT_POOLTAG);
-                
-                if (pAudioModules[j].Context == NULL)
-                {
-                    ntStatus = STATUS_INSUFFICIENT_RESOURCES;
-                    goto exit;
-                }
-            }
-        
-            //
-            // Init this module instance.
-            //
-            if (moduleDesc->InitInstance)
-            {
-                ntStatus = moduleDesc->InitInstance(moduleDesc,
-                                                 m_pAudioModules[i].Context,
-                                                 pAudioModules[j].Context,
-                                                 size,
-                                                 pAudioModules[j].InstanceId);
-                if (!NT_SUCCESS(ntStatus))
-                {
-                    ASSERT(FALSE);
-                    goto exit;
-                }
-            }
-
-            //
-            // Update stream module array index.
-            //
-            j++;
-        }
-    }
-
-    //
-    // Return the list of modules.
-    //
-    *ppAudioModules = pAudioModules;
-    *pAudioModuleCount = cModules;
-
-    ntStatus = STATUS_SUCCESS;
-    
-exit:
-
-    if (!NT_SUCCESS(ntStatus))
-    {
-        if (pAudioModules != NULL)
-        {
-            FreeStreamAudioModules(pAudioModules, cModules);
-            pAudioModules = NULL;
-            cModules = 0;
-        }
-    }
-    
-    return ntStatus;
-}
-
-#pragma code_seg("PAGE")
-VOID
-CMiniportWaveRT::FreeStreamAudioModules
-(
-    _In_ AUDIOMODULE *     pAudioModules,
-    _In_ ULONG             AudioModuleCount
-)
-{
-    PAGED_CODE();
-    
-    if (pAudioModules != NULL)
-    {
-        ASSERT(AudioModuleCount);
-        
-        for (ULONG i=0; i<AudioModuleCount; ++i)
-        {
-            if (pAudioModules[i].Context)
-            {
-                if (pAudioModules[i].Descriptor->Cleanup)
-                {
-                    pAudioModules[i].Descriptor->Cleanup(pAudioModules[i].Context);
-                }
-                
-                ExFreePoolWithTag(pAudioModules[i].Context, MINWAVERT_POOLTAG);
-                pAudioModules[i].Context = NULL;
-            }
-        }
-
-        ExFreePoolWithTag(pAudioModules, MINWAVERT_POOLTAG);
-    }
-}
-
-//=============================================================================
-#pragma code_seg("PAGE")
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Get_SoundDetectorSupportedPatterns)
-{
-    CONTOSO_SUPPORTEDPATTERNSVALUE *value;
-
-    PAGED_CODE();
-
-    NT_ASSERT(PropertyRequest->ValueSize >= sizeof(*value));
-
-    // Does this filter support a sound detector?
-    if ((m_DeviceFlags & ENDPOINT_SOUNDDETECTOR_SUPPORTED) == 0)
-    {
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    value = (CONTOSO_SUPPORTEDPATTERNSVALUE*)PropertyRequest->Value;
-
-    RtlZeroMemory(value, sizeof(*value));
-
-    value->MultipleItem.Size = sizeof(*value);
-    value->MultipleItem.Count = 1;
-    value->PatternType[0] = CONTOSO_KEYWORDCONFIGURATION_IDENTIFIER;
-
-    PropertyRequest->ValueSize = sizeof(*value);
-
-    return STATUS_SUCCESS;
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Set_SoundDetectorPatterns)
-{
-    KSMULTIPLE_ITEM *itemsHeader;
-    SOUNDDETECTOR_PATTERNHEADER *patternHeader;
-    CONTOSO_KEYWORDCONFIGURATION *pattern;
-    ULONG cbRemaining;                          // Tracks bytes remaining in property value
-
-    PAGED_CODE();
-
-    cbRemaining = PropertyRequest->ValueSize;
-
-    // The SYSVADPROPERTY_ITEM for this property ensures the value size is at
-    // least sizeof KSMULTIPLE_ITEM.
-    if (cbRemaining < sizeof(KSMULTIPLE_ITEM))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    itemsHeader = (KSMULTIPLE_ITEM*)PropertyRequest->Value;
-
-    // Verify property value is large enough to include the items
-    if (itemsHeader->Size > cbRemaining)
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    // No items so clear the configuration.
-    if (itemsHeader->Count == 0)
-    {
-        m_KeywordDetector.ResetDetector(CONTOSO_KEYWORD1);
-        return STATUS_SUCCESS;
-    }
-
-    // This sample supports only 1 pattern type.
-    if (itemsHeader->Count > 1)
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    // Bytes remaining after the items header
-    cbRemaining = itemsHeader->Size - sizeof(*itemsHeader);
-
-    // Verify the property value is large enough to include the pattern header.
-    if (cbRemaining < sizeof(SOUNDDETECTOR_PATTERNHEADER))
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    patternHeader = (SOUNDDETECTOR_PATTERNHEADER*)(itemsHeader + 1);
-
-    // Verify the pattern type is supported.
-    if (patternHeader->PatternType != CONTOSO_KEYWORDCONFIGURATION_IDENTIFIER)
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    // Verify the property value is large enough for the pattern.
-    if (cbRemaining < patternHeader->Size)
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    // Verify the pattern is large enough.
-    if (patternHeader->Size != sizeof(CONTOSO_KEYWORDCONFIGURATION))
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    pattern = (CONTOSO_KEYWORDCONFIGURATION*)(patternHeader);
-
-    // Program the hardware.
-    return m_KeywordDetector.DownloadDetectorData(CONTOSO_KEYWORD1, pattern->ContosoDetectorConfigurationData);
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Get_SoundDetectorArmed)
-{
-    PAGED_CODE();
-
-    // The SYSVADPROPERTY_ITEM for this property ensures the value size is at
-    // least sizeof BOOL.
-    NT_ASSERT(PropertyRequest->ValueSize >= sizeof(BOOL));
-
-    RtlZeroMemory(PropertyRequest->Value, PropertyRequest->ValueSize);
-
-    return m_KeywordDetector.GetArmed(CONTOSO_KEYWORD1, (BOOL*)PropertyRequest->Value);
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Set_SoundDetectorArmed)
-{
-    NTSTATUS ntStatus;
-    BOOL armed;
-
-    PAGED_CODE();
-
-    // The SYSVADPROPERTY_ITEM for this property ensures the value size is at
-    // least sizeof BOOL.
-    NT_ASSERT(PropertyRequest->ValueSize >= sizeof(BOOL));
-
-    armed = ((*(BOOL*)PropertyRequest->Value) != 0);
-
-    ntStatus = m_KeywordDetector.SetArmed(CONTOSO_KEYWORD1, armed);
-
-    if (NT_SUCCESS(ntStatus) && armed)
-    {
-        // FUTURE-2014/10/20 For now immediately signal a detection as soon as
-        // it is armed, but later, find a better way to demonstrate this from
-        // within CKeywordDetector.
-        m_pPortEvents->GenerateEventList(const_cast<GUID*>(&KSEVENTSETID_SoundDetector), KSEVENT_SOUNDDETECTOR_MATCHDETECTED, FALSE, 0, FALSE, 0);
-        m_KeywordDetector.SetArmed(CONTOSO_KEYWORD1, FALSE);
-    }
-
-    return ntStatus;
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Get_SoundDetectorMatchResult)
-{
-    CONTOSO_KEYWORDDETECTIONRESULT *value;
-    
-    PAGED_CODE();
-    
-    if (PropertyRequest->ValueSize < sizeof(*value))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    value = (CONTOSO_KEYWORDDETECTIONRESULT *)PropertyRequest->Value;
-
-    RtlZeroMemory(value, sizeof(*value));
-
-    value->Header.Size = sizeof(CONTOSO_KEYWORDDETECTIONRESULT);
-    value->Header.PatternType = CONTOSO_KEYWORDCONFIGURATION_IDENTIFIER;
-    value->KeywordStartTimestamp = m_KeywordDetector.GetStartTimestamp();
-    value->KeywordStopTimestamp = m_KeywordDetector.GetStopTimestamp();
-
-    PropertyRequest->ValueSize = sizeof(*value);
-
-    return m_KeywordDetector.GetDetectorData(CONTOSO_KEYWORD1, &(value->ContosoDetectorResultData));
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Get_SoundDetectorSupportedPatterns2)
-{
-    CONTOSO_SUPPORTEDPATTERNSVALUE *value;
-    PKSSOUNDDETECTORPROPERTY        propertyInstance = NULL;
-
-    PAGED_CODE();
-
-    NT_ASSERT(PropertyRequest->ValueSize >= sizeof(*value));
-
-    if (PropertyRequest->InstanceSize < (sizeof(KSSOUNDDETECTORPROPERTY) - RTL_SIZEOF_THROUGH_FIELD(KSSOUNDDETECTORPROPERTY, Property)))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    propertyInstance = CONTAINING_RECORD(PropertyRequest->Instance, KSSOUNDDETECTORPROPERTY, EventId);
-
-    // There is currently only support for 1 OEM DLL, and that CLSID is returned when
-    // the EventID is GUID_NULL.
-    if (propertyInstance->EventId != GUID_NULL)
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    // Does this filter support a sound detector?
-    if ((m_DeviceFlags & ENDPOINT_SOUNDDETECTOR_SUPPORTED) == 0)
-    {
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    value = (CONTOSO_SUPPORTEDPATTERNSVALUE*)PropertyRequest->Value;
-
-    RtlZeroMemory(value, sizeof(*value));
-
-    value->MultipleItem.Size = sizeof(*value);
-    value->MultipleItem.Count = 1;
-    value->PatternType[0] = CONTOSO_KEYWORDCONFIGURATION_IDENTIFIER2;
-
-    PropertyRequest->ValueSize = sizeof(*value);
-
-    return STATUS_SUCCESS;
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Set_SoundDetectorPatterns2)
-{
-    KSMULTIPLE_ITEM *itemsHeader;
-    PKSSOUNDDETECTORPROPERTY        propertyInstance = NULL;
-    SOUNDDETECTOR_PATTERNHEADER *patternHeader;
-    CONTOSO_KEYWORDCONFIGURATION *pattern;
-    ULONG cbRemaining;                          // Tracks bytes remaining in property value
-
-    PAGED_CODE();
-
-    if (PropertyRequest->InstanceSize < (sizeof(KSSOUNDDETECTORPROPERTY) - RTL_SIZEOF_THROUGH_FIELD(KSSOUNDDETECTORPROPERTY, Property)))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    propertyInstance = CONTAINING_RECORD(PropertyRequest->Instance, KSSOUNDDETECTORPROPERTY, EventId);
-
-    cbRemaining = PropertyRequest->ValueSize;
-
-    // The SYSVADPROPERTY_ITEM for this property ensures the value size is at
-    // least sizeof KSMULTIPLE_ITEM.
-    if (cbRemaining < sizeof(KSMULTIPLE_ITEM))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    itemsHeader = (KSMULTIPLE_ITEM*)PropertyRequest->Value;
-
-    // Verify property value is large enough to include the items
-    if (itemsHeader->Size > cbRemaining)
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    // No items so clear the configuration.
-    if (itemsHeader->Count == 0)
-    {
-        m_KeywordDetector.ResetDetector(propertyInstance->EventId);
-        return STATUS_SUCCESS;
-    }
-
-    // This sample supports only 1 pattern type.
-    if (itemsHeader->Count > 1)
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    // Bytes remaining after the items header
-    cbRemaining = itemsHeader->Size - sizeof(*itemsHeader);
-
-    // Verify the property value is large enough to include the pattern header.
-    if (cbRemaining < sizeof(SOUNDDETECTOR_PATTERNHEADER))
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    patternHeader = (SOUNDDETECTOR_PATTERNHEADER*)(itemsHeader + 1);
-
-    // Verify the pattern type is supported.
-    if (patternHeader->PatternType != CONTOSO_KEYWORDCONFIGURATION_IDENTIFIER2)
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    // Verify the property value is large enough for the pattern.
-    if (cbRemaining < patternHeader->Size)
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    // Verify the pattern is large enough.
-    if (patternHeader->Size != sizeof(CONTOSO_KEYWORDCONFIGURATION))
-    {
-        PropertyRequest->ValueSize = 0;
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    pattern = (CONTOSO_KEYWORDCONFIGURATION*)(patternHeader);
-
-    return m_KeywordDetector.DownloadDetectorData(propertyInstance->EventId, pattern->ContosoDetectorConfigurationData);
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Get_SoundDetectorArmed2)
-{
-    PKSSOUNDDETECTORPROPERTY        propertyInstance = NULL;
-
-    PAGED_CODE();
-
-    if (PropertyRequest->InstanceSize < (sizeof(KSSOUNDDETECTORPROPERTY) - RTL_SIZEOF_THROUGH_FIELD(KSSOUNDDETECTORPROPERTY, Property)))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    propertyInstance = CONTAINING_RECORD(PropertyRequest->Instance, KSSOUNDDETECTORPROPERTY, EventId);
-
-    // The SYSVADPROPERTY_ITEM for this property ensures the value size is at
-    // least sizeof BOOL.
-    NT_ASSERT(PropertyRequest->ValueSize >= sizeof(BOOL));
-
-    RtlZeroMemory(PropertyRequest->Value, PropertyRequest->ValueSize);
-    return m_KeywordDetector.GetArmed(propertyInstance->EventId, (BOOL*)PropertyRequest->Value);
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Set_SoundDetectorArmed2)
-{
-    NTSTATUS ntStatus;
-    BOOL armed;
-    PKSSOUNDDETECTORPROPERTY        propertyInstance = NULL;
-
-    PAGED_CODE();
-
-    if (PropertyRequest->InstanceSize < (sizeof(KSSOUNDDETECTORPROPERTY) - RTL_SIZEOF_THROUGH_FIELD(KSSOUNDDETECTORPROPERTY, Property)))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    propertyInstance = CONTAINING_RECORD(PropertyRequest->Instance, KSSOUNDDETECTORPROPERTY, EventId);
-
-    // The SYSVADPROPERTY_ITEM for this property ensures the value size is at
-    // least sizeof BOOL.
-    NT_ASSERT(PropertyRequest->ValueSize >= sizeof(BOOL));
-
-    armed = ((*(BOOL*)PropertyRequest->Value) != 0);
-
-    ntStatus = m_KeywordDetector.SetArmed(propertyInstance->EventId, armed);
-
-    // THIS BLOCK IS FOR SYSVAD TESTING ONLY AND WILL NEED TO BE REMOVED
-    if (NT_SUCCESS(ntStatus) && armed &&
-        (propertyInstance->EventId == CONTOSO_KEYWORD1 || 
-        propertyInstance->EventId == CONTOSO_KEYWORD2))
-    {
-        CONTOSO_KEYWORDDETECTIONRESULT value = {0};
-
-        m_KeywordDetector.NotifyDetection();
-
-        value.EventId = propertyInstance->EventId;
-        value.Header.Size = sizeof(CONTOSO_KEYWORDDETECTIONRESULT);
-        value.Header.PatternType = CONTOSO_KEYWORDCONFIGURATION_IDENTIFIER2;
-        value.KeywordStartTimestamp = m_KeywordDetector.GetStartTimestamp();
-        value.KeywordStopTimestamp = m_KeywordDetector.GetStopTimestamp();        
-        m_KeywordDetector.GetDetectorData(propertyInstance->EventId, &(value.ContosoDetectorResultData));
-
-        SendPNPNotification(&KSNOTIFICATIONID_SoundDetector, &value, sizeof(value));
-    }
-
-    return ntStatus;
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Set_SoundDetectorReset2)
-{
-    NTSTATUS ntStatus = STATUS_SUCCESS;
-    BOOL reset;
-    PKSSOUNDDETECTORPROPERTY        propertyInstance = NULL;
-
-    PAGED_CODE();
-
-    if (PropertyRequest->InstanceSize < (sizeof(KSSOUNDDETECTORPROPERTY) - RTL_SIZEOF_THROUGH_FIELD(KSSOUNDDETECTORPROPERTY, Property)))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    propertyInstance = CONTAINING_RECORD(PropertyRequest->Instance, KSSOUNDDETECTORPROPERTY, EventId);
-
-    // The SYSVADPROPERTY_ITEM for this property ensures the value size is at
-    // least sizeof BOOL.
-    NT_ASSERT(PropertyRequest->ValueSize >= sizeof(BOOL));
-
-    reset = ((*(BOOL*)PropertyRequest->Value) != 0);
-
-    if (reset)
-    {
-        ntStatus = m_KeywordDetector.ResetDetector(propertyInstance->EventId);
-    }
-
-    return ntStatus;
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Get_SoundDetectorStreamingSupport2)
-{
-    PKSSOUNDDETECTORPROPERTY        propertyInstance = NULL;
-
-    PAGED_CODE();
-
-    if (PropertyRequest->InstanceSize < (sizeof(KSSOUNDDETECTORPROPERTY) - RTL_SIZEOF_THROUGH_FIELD(KSSOUNDDETECTORPROPERTY, Property)))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    propertyInstance = CONTAINING_RECORD(PropertyRequest->Instance, KSSOUNDDETECTORPROPERTY, EventId);
-
-    // The SYSVADPROPERTY_ITEM for this property ensures the value size is at
-    // least sizeof BOOL.
-    NT_ASSERT(PropertyRequest->ValueSize >= sizeof(BOOL));
-
-    RtlZeroMemory(PropertyRequest->Value, PropertyRequest->ValueSize);
-    return m_KeywordDetector.GetStreamingSupport(propertyInstance->EventId, (BOOL*)PropertyRequest->Value);
-}
-
-DEFINE_CLASSPROPERTYHANDLER(CMiniportWaveRT, Get_InterleavedFormatInformation)
-{
-    PAGED_CODE();
-
-    PKSP_PIN propertyInstance = NULL;
-
-    // being a SYSVADPROPERTY, the property item is a SYSVADPROPERTY_ITEM, which contains
-    // some context information from the endpoint
-    SYSVADPROPERTY_ITEM* item = (SYSVADPROPERTY_ITEM*)PropertyRequest->PropertyItem;
-
-    // retrieve the pin information, so we can validate that this was called on the keyword pin
-    if (PropertyRequest->InstanceSize < (sizeof(KSP_PIN) - RTL_SIZEOF_THROUGH_FIELD(KSP_PIN, Property)))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    propertyInstance = CONTAINING_RECORD(PropertyRequest->Instance, KSP_PIN, PinId);
-
-    // Only Keyword burst pins may support interleaving loopback and microphone audio
-    if (!IsKeywordDetectorPin(propertyInstance->PinId))
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    // If the context data provided for this endpoint is invalid, or if it is larger than the amount
-    // of data requested, then we have an invalid parameter
-    if (NULL == item->ContextData || item->ContextDataSize > PropertyRequest->ValueSize)
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    // copy the context data (which is interleaving information), into the output.
-    RtlCopyMemory(PropertyRequest->Value, item->ContextData , item->ContextDataSize);
-
-    return STATUS_SUCCESS;
-}
-
-
-#pragma code_seg()
-NTSTATUS CMiniportWaveRT_EventHandler_SoundDetectorMatchDetected
-(
-    _In_  PPCEVENT_REQUEST EventRequest
-)
-{
-    CMiniportWaveRT* miniport = reinterpret_cast<CMiniportWaveRT*>(EventRequest->MajorTarget);
-    return miniport->EventHandler_SoundDetectorMatchDetected(EventRequest);
-}
-
-#pragma code_seg()
-NTSTATUS CMiniportWaveRT::EventHandler_SoundDetectorMatchDetected
-(
-    _In_  PPCEVENT_REQUEST EventRequest
-)
-{
-    if (EventRequest->Verb == PCEVENT_VERB_ADD)
-    {
-        _IRQL_limited_to_(PASSIVE_LEVEL);
-        m_pPortEvents->AddEventToEventList(EventRequest->EventEntry);
-    }
-    return STATUS_SUCCESS;
-}
-#pragma code_seg("PAGE")
-NTSTATUS
-PropertyHandler_WaveFilter
+CMiniportWaveRT::PropertyHandler_WaveFilter // Renamed from PropertyHandler_WaveFilterSysVAD
 ( 
     _In_ PPCPROPERTY_REQUEST      PropertyRequest 
 )
@@ -3271,11 +2334,103 @@ Return Value:
                 
         }
     }
+    else if (IsEqualGUIDAligned(*PropertyRequest->PropertyItem->Set, KSPROPSETID_LamaLoopback) &&
+             (pWaveHelper->m_DeviceType == eLamaLoopbackRenderDevice || pWaveHelper->m_DeviceType == eLamaLoopbackCaptureDevice))
+    {
+        ntStatus = CMiniportWaveRT::PropertyHandlerLamaSampleRate(PropertyRequest);
+    }
+
 
     pWaveHelper->Release();
 
     return ntStatus;
 } // PropertyHandler_WaveFilter
+
+//=============================================================================
+#pragma code_seg("PAGE")
+NTSTATUS
+CMiniportWaveRT::PropertyHandlerLamaSampleRate
+(
+    _In_ PPCPROPERTY_REQUEST PropertyRequest
+)
+{
+    PAGED_CODE();
+    ASSERT(PropertyRequest);
+    DPF_ENTER(("[CMiniportWaveRT::PropertyHandlerLamaSampleRate]"));
+
+    NTSTATUS ntStatus = STATUS_INVALID_DEVICE_REQUEST;
+    CMiniportWaveRT* pMiniport = reinterpret_cast<CMiniportWaveRT*>(PropertyRequest->MajorTarget);
+
+    if (pMiniport == NULL || 
+        !(pMiniport->m_DeviceType == eLamaLoopbackRenderDevice || pMiniport->m_DeviceType == eLamaLoopbackCaptureDevice))
+    {
+        return STATUS_INVALID_DEVICE_REQUEST;
+    }
+
+    if (PropertyRequest->PropertyItem->Id != KSPROPERTY_LAMA_SAMPLE_RATE)
+    {
+        return STATUS_INVALID_DEVICE_REQUEST;
+    }
+
+    if (PropertyRequest->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
+    {
+        ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET;
+        ntStatus = PropertyHandler_BasicSupport(PropertyRequest, flags, VT_UI4);
+    }
+    else if (PropertyRequest->Verb & KSPROPERTY_TYPE_GET)
+    {
+        if (PropertyRequest->ValueSize >= sizeof(ULONG))
+        {
+            *(PULONG(PropertyRequest->Value)) = pMiniport->m_currentSampleRate;
+            PropertyRequest->ValueSize = sizeof(ULONG);
+            ntStatus = STATUS_SUCCESS;
+        }
+        else if (PropertyRequest->ValueSize == 0) // Query for size
+        {
+             PropertyRequest->ValueSize = sizeof(ULONG);
+             ntStatus = STATUS_BUFFER_OVERFLOW;
+        }
+        else // Buffer too small
+        {
+            ntStatus = STATUS_BUFFER_TOO_SMALL;
+        }
+    }
+    else if (PropertyRequest->Verb & KSPROPERTY_TYPE_SET)
+    {
+        if (PropertyRequest->ValueSize >= sizeof(ULONG))
+        {
+            ULONG newSampleRate = *(PULONG(PropertyRequest->Value));
+            // Basic validation - a real driver might have a list of supported rates.
+            if (newSampleRate >= 8000 && newSampleRate <= 192000) 
+            {
+                pMiniport->m_currentSampleRate = newSampleRate;
+                
+                // Update the dynamic format
+                pMiniport->m_dynamicFormat16ch.WaveFormatEx.nSamplesPerSec = newSampleRate;
+                pMiniport->m_dynamicFormat16ch.WaveFormatEx.nAvgBytesPerSec = 
+                    newSampleRate * 
+                    pMiniport->m_dynamicFormat16ch.WaveFormatEx.nChannels * 
+                    (pMiniport->m_dynamicFormat16ch.WaveFormatEx.wBitsPerSample / 8);
+                
+                // NOTE: This is where KSEVENT_PINCAPS_FORMATCHANGE would ideally be signaled
+                // to notify clients of the format change. This part is deferred.
+
+                ntStatus = STATUS_SUCCESS;
+            }
+            else
+            {
+                ntStatus = STATUS_INVALID_PARAMETER;
+            }
+        }
+        else
+        {
+            ntStatus = STATUS_BUFFER_TOO_SMALL;
+        }
+    }
+    
+    return ntStatus;
+}
+
 //=============================================================================
 #pragma code_seg("PAGE")
 NTSTATUS
@@ -3283,6 +2438,21 @@ PropertyHandler_OffloadPin
 ( 
     _In_ PPCPROPERTY_REQUEST      PropertyRequest 
 )
+/*++
+
+Routine Description:
+
+  Redirects general property request to miniport object
+
+Arguments:
+
+  PropertyRequest - 
+
+Return Value:
+
+  NT status code.
+
+--*/
 {
     PAGED_CODE();
 
@@ -3910,5 +3080,3 @@ Exit:
 }
 
 #pragma code_seg()
-
-
