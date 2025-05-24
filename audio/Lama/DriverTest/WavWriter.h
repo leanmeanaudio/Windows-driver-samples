@@ -45,11 +45,10 @@ namespace WavWriter {
             // This simple writer only supports 16-bit PCM.
             return false; 
         }
-        if (numChannels == 0 || numChannels > 2) {
-            // This simple writer only supports mono or stereo.
-            // For 16-channel driver, would need to adapt or use a different writer.
-            return false;
-        }
+        // Removed channel number check to support multi-channel
+        // if (numChannels == 0 || numChannels > 2) { 
+        //     return false;
+        // }
 
         std::ofstream outFile(filename, std::ios::binary | std::ios::trunc);
         if (!outFile.is_open()) {
