@@ -38,21 +38,21 @@ CMiniportWaveRTLamaLoopbackStream::CMiniportWaveRTLamaLoopbackStream
   m_bCapture(FALSE),
   m_instanceIndex(0), // Initialize instance index
   m_pAudioBufferMdl(NULL),
-  m_pAudioBuffer(NULL),      
+  m_pAudioBuffer(NULL),
   m_ulCurrentBufferSize(0),
-  m_ulMaxBufferSize(LAMA_MAX_STREAM_BUFFER_SIZE), 
-  m_ulChannelCount(0),
+  m_ulMaxBufferSize(LAMA_MAX_STREAM_BUFFER_SIZE),
+  m_ulChannelCount(0),    // This will store the client's channel count
   m_ulSampleRate(0),
-  m_ulBitsPerSample(0),
+  m_ulBitsPerSample(0),   // This will store the client's bits per sample
   m_NotificationEvent(NULL),
-  m_ulDmaMovementRate(0), 
+  m_ulDmaMovementRate(0),
   m_ullPlayPosition(0),
   m_ullWritePosition(0)
 {
     PAGED_CODE();
     DPF_ENTER(("CMiniportWaveRTLamaLoopbackStream::CMiniportWaveRTLamaLoopbackStream"));
-    RtlZeroMemory(&m_NotificationTimer, sizeof(m_NotificationTimer)); 
-    RtlZeroMemory(&m_NotificationDpc, sizeof(m_NotificationDpc)); 
+    RtlZeroMemory(&m_NotificationTimer, sizeof(m_NotificationTimer));
+    RtlZeroMemory(&m_NotificationDpc, sizeof(m_NotificationDpc));
 }
 
 //-----------------------------------------------------------------------------
@@ -69,14 +69,14 @@ CMiniportWaveRTLamaLoopbackStream::~CMiniportWaveRTLamaLoopbackStream()
         m_pDataFormat = NULL;
     }
 
-    if (m_pAudioBufferMdl || m_pAudioBuffer) 
+    if (m_pAudioBufferMdl || m_pAudioBuffer)
     {
-        FreeAudioBuffer(m_pAudioBufferMdl, m_ulCurrentBufferSize); 
+        FreeAudioBuffer(m_pAudioBufferMdl, m_ulCurrentBufferSize);
     }
-    
+
     if (m_NotificationEvent)
     {
-        m_NotificationEvent = NULL; 
+        m_NotificationEvent = NULL;
     }
 
     if (m_pPortStream)
@@ -84,7 +84,7 @@ CMiniportWaveRTLamaLoopbackStream::~CMiniportWaveRTLamaLoopbackStream()
         m_pPortStream->Release();
         m_pPortStream = NULL;
     }
-    
+
     DPF_LEAVE(("CMiniportWaveRTLamaLoopbackStream::~CMiniportWaveRTLamaLoopbackStream"));
 }
 
@@ -161,9 +161,14 @@ CMiniportWaveRTLamaLoopbackStream::Init
     PKSDATAFORMAT_WAVEFORMATEX pKsDataFormatWfx = reinterpret_cast<PKSDATAFORMAT_WAVEFORMATEX>(DataFormat);
     WAVEFORMATEX* wfex = &pKsDataFormatWfx->WaveFormatEx;
 
+    // Store client's format details
     m_ulSampleRate    = wfex->nSamplesPerSec;
     m_ulChannelCount  = wfex->nChannels;
     m_ulBitsPerSample = wfex->wBitsPerSample;
+
+    DPF(DPF_LEVEL_INFO, ("Stream Init (Inst %u, %s): Client Format %uHz, %uch, %ubit",
+        m_instanceIndex, m_bCapture ? "Capture" : "Render", m_ulSampleRate, m_ulChannelCount, m_ulBitsPerSample));
+
 
     if (m_ulSampleRate < MIN_SAMPLE_RATE_PCM || m_ulSampleRate > MAX_SAMPLE_RATE_PCM ||
         (wfex->wFormatTag != WAVE_FORMAT_PCM && wfex->wFormatTag != WAVE_FORMAT_EXTENSIBLE) )
@@ -172,19 +177,22 @@ CMiniportWaveRTLamaLoopbackStream::Init
         ntStatus = STATUS_NOT_SUPPORTED;
         goto Exit;
     }
-    if (m_ulBitsPerSample < MIN_BITS_PER_SAMPLE_PCM || m_ulBitsPerSample > MAX_BITS_PER_SAMPLE_PCM)
+    // For WaveRT, we'll assume 16-bit PCM as the internal shared buffer is 16-bit.
+    // If client requests other bit depths, that's an advanced scenario needing conversion.
+    // The current common.h also defines MIN/MAX_BITS_PER_SAMPLE_PCM as 16.
+    if (m_ulBitsPerSample != 16)
     {
-        DPF(DPF_LEVEL_ERROR, ("Init: Unsupported Bits Per Sample: %u", m_ulBitsPerSample));
+        DPF(DPF_LEVEL_ERROR, ("Init: WaveRT Stream currently only supports 16 Bits Per Sample, got %u", m_ulBitsPerSample));
         ntStatus = STATUS_NOT_SUPPORTED;
         goto Exit;
     }
-    if (m_ulChannelCount < MIN_CHANNELS_PCM || m_ulChannelCount > MAX_CHANNELS_PCM)
+    if (m_ulChannelCount < MIN_CHANNELS_PCM || m_ulChannelCount > MAX_CHANNELS_PCM) // Client can request up to 16
     {
         DPF(DPF_LEVEL_ERROR, ("Init: Unsupported Channel Count: %u", m_ulChannelCount));
         ntStatus = STATUS_NOT_SUPPORTED;
         goto Exit;
     }
-    
+
     if (m_pDataFormat)
     {
         ExFreePoolWithTag(m_pDataFormat, LAMA_POOL_TAG);
@@ -200,11 +208,11 @@ CMiniportWaveRTLamaLoopbackStream::Init
     RtlCopyMemory(m_pDataFormat, DataFormat, DataFormat->FormatSize);
 
     m_KsState = KSSTATE_STOP;
-    m_ulMaxBufferSize = LAMA_MAX_STREAM_BUFFER_SIZE; 
-    m_ulCurrentBufferSize = 0; 
+    m_ulMaxBufferSize = LAMA_MAX_STREAM_BUFFER_SIZE;
+    m_ulCurrentBufferSize = 0;
     m_pAudioBufferMdl = NULL;
     m_pAudioBuffer = NULL;
-    m_NotificationEvent = NULL; 
+    m_NotificationEvent = NULL;
 
 Exit:
     if (!NT_SUCCESS(ntStatus))
@@ -216,10 +224,10 @@ Exit:
     return ntStatus;
 }
 
-#pragma code_seg("PAGE") 
+#pragma code_seg("PAGE")
 
 //-----------------------------------------------------------------------------
-// CMiniportWaveRTLamaLoopbackStream::SetFormat - (Existing, no changes needed for this subtask)
+// CMiniportWaveRTLamaLoopbackStream::SetFormat - (Unchanged for Strategy A)
 //-----------------------------------------------------------------------------
 STDMETHODIMP_(NTSTATUS)
 CMiniportWaveRTLamaLoopbackStream::SetFormat
@@ -233,41 +241,51 @@ CMiniportWaveRTLamaLoopbackStream::SetFormat
     if (!IsEqualGUIDAligned(DataFormat->MajorFormat, KSDATAFORMAT_TYPE_AUDIO) || !IsEqualGUIDAligned(DataFormat->SubFormat, KSDATAFORMAT_SUBTYPE_PCM) || !IsEqualGUIDAligned(DataFormat->Specifier, KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)) { DPF(DPF_LEVEL_ERROR, ("SetFormat: Unsupported DataFormat Major/Sub/Specifier.")); ntStatus = STATUS_NOT_SUPPORTED; goto Exit; }
     PKSDATAFORMAT_WAVEFORMATEX pKsDataFormatWfx = reinterpret_cast<PKSDATAFORMAT_WAVEFORMATEX>(DataFormat); WAVEFORMATEX* wfex = &pKsDataFormatWfx->WaveFormatEx;
     if (wfex->nSamplesPerSec < MIN_SAMPLE_RATE_PCM || wfex->nSamplesPerSec > MAX_SAMPLE_RATE_PCM || (wfex->wFormatTag != WAVE_FORMAT_PCM && wfex->wFormatTag != WAVE_FORMAT_EXTENSIBLE) ) { DPF(DPF_LEVEL_ERROR, ("SetFormat: Unsupported Sample Rate (%u) or Format Tag (0x%X).", wfex->nSamplesPerSec, wfex->wFormatTag)); ntStatus = STATUS_NOT_SUPPORTED; goto Exit; }
-    if (wfex->wBitsPerSample < MIN_BITS_PER_SAMPLE_PCM || wfex->wBitsPerSample > MAX_BITS_PER_SAMPLE_PCM) { DPF(DPF_LEVEL_ERROR, ("SetFormat: Unsupported Bits Per Sample: %u", wfex->wBitsPerSample)); ntStatus = STATUS_NOT_SUPPORTED; goto Exit; }
+
+    if (wfex->wBitsPerSample != 16) { DPF(DPF_LEVEL_ERROR, ("SetFormat: WaveRT Stream currently only supports 16 Bits Per Sample: %u", wfex->wBitsPerSample)); ntStatus = STATUS_NOT_SUPPORTED; goto Exit; }
     if (wfex->nChannels < MIN_CHANNELS_PCM || wfex->nChannels > MAX_CHANNELS_PCM) { DPF(DPF_LEVEL_ERROR, ("SetFormat: Unsupported Channel Count: %u", wfex->nChannels)); ntStatus = STATUS_NOT_SUPPORTED; goto Exit; }
-    if (m_pDataFormat) { ExFreePoolWithTag(m_pDataFormat, LAMA_POOL_TAG); m_pDataFormat = NULL; } if (m_pAudioBufferMdl) { FreeAudioBuffer(m_pAudioBufferMdl, m_ulCurrentBufferSize); } 
+
+    if (m_pDataFormat) { ExFreePoolWithTag(m_pDataFormat, LAMA_POOL_TAG); m_pDataFormat = NULL; }
+    if (m_pAudioBufferMdl) { FreeAudioBuffer(m_pAudioBufferMdl, m_ulCurrentBufferSize); /* Resets m_pAudioBufferMdl, m_pAudioBuffer, m_ulCurrentBufferSize */ }
     m_pDataFormat = (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE) ExAllocatePoolWithTag(NonPagedPoolNx, DataFormat->FormatSize, LAMA_POOL_TAG);
     if (!m_pDataFormat) { DPF(DPF_LEVEL_ERROR, ("SetFormat: Failed to allocate memory for new m_pDataFormat")); ntStatus = STATUS_INSUFFICIENT_RESOURCES; goto Exit; }
-    RtlCopyMemory(m_pDataFormat, DataFormat, DataFormat->FormatSize); m_ulSampleRate = wfex->nSamplesPerSec; m_ulChannelCount = wfex->nChannels; m_ulBitsPerSample = wfex->wBitsPerSample;
+    RtlCopyMemory(m_pDataFormat, DataFormat, DataFormat->FormatSize);
+    // Update client's format
+    m_ulSampleRate = wfex->nSamplesPerSec;
+    m_ulChannelCount = wfex->nChannels;
+    m_ulBitsPerSample = wfex->wBitsPerSample;
+    DPF(DPF_LEVEL_INFO, ("Stream SetFormat (Inst %u, %s): Client Format %uHz, %uch, %ubit",
+        m_instanceIndex, m_bCapture ? "Capture" : "Render", m_ulSampleRate, m_ulChannelCount, m_ulBitsPerSample));
+
 Exit: DPF_LEAVE(("CMiniportWaveRTLamaLoopbackStream::SetFormat, status=0x%08x", ntStatus)); return ntStatus;
 }
 
 //-----------------------------------------------------------------------------
-// CMiniportWaveRTLamaLoopbackStream::SetState - (Existing, no changes needed for this subtask)
+// CMiniportWaveRTLamaLoopbackStream::SetState - (Unchanged)
 //-----------------------------------------------------------------------------
 STDMETHODIMP_(NTSTATUS)
 CMiniportWaveRTLamaLoopbackStream::SetState(_In_ KSSTATE KsState)
 { PAGED_CODE(); DPF_ENTER(("CMiniportWaveRTLamaLoopbackStream::SetState, NewState=%d, CurrentState=%d", KsState, m_KsState)); NTSTATUS ntStatus = STATUS_SUCCESS; KSSTATE oldState = m_KsState; if (KsState == KSSTATE_RUN && oldState != KSSTATE_RUN) { m_ullPlayPosition = 0; m_ullWritePosition = 0; DPF(DPF_LEVEL_INFO, ("SetState: Transitioning to RUN. Data flow should begin.")); } else if (KsState == KSSTATE_STOP && oldState != KSSTATE_STOP) { DPF(DPF_LEVEL_INFO, ("SetState: Transitioning to STOP. Data flow should cease.")); } m_KsState = KsState; DPF_LEAVE(("CMiniportWaveRTLamaLoopbackStream::SetState, status=0x%08x", ntStatus)); return ntStatus; }
 
 //-----------------------------------------------------------------------------
-// CMiniportWaveRTLamaLoopbackStream::GetPosition - (Existing, no changes needed for this subtask)
+// CMiniportWaveRTLamaLoopbackStream::GetPosition - (Unchanged)
 //-----------------------------------------------------------------------------
 STDMETHODIMP_(NTSTATUS)
 CMiniportWaveRTLamaLoopbackStream::GetPosition(_Out_ PKSAUDIO_POSITION Position)
 { ASSERT(Position); if (!m_pPortStream || !m_pDataFormat || m_ulCurrentBufferSize == 0) { Position->PlayOffset = 0; Position->WriteOffset = 0; return (m_pPortStream && m_pDataFormat) ? STATUS_SUCCESS : STATUS_INVALID_DEVICE_STATE; } if (m_KsState == KSSTATE_STOP) { Position->PlayOffset = 0; Position->WriteOffset = 0; return STATUS_SUCCESS; } Position->PlayOffset = m_ullPlayPosition % m_ulCurrentBufferSize; Position->WriteOffset = m_ullWritePosition % m_ulCurrentBufferSize; return STATUS_SUCCESS; }
 
-#pragma code_seg() 
-#pragma code_seg("NONPAGED") 
+#pragma code_seg()
+#pragma code_seg("NONPAGED")
 
 //-----------------------------------------------------------------------------
-// CMiniportWaveRTLamaLoopbackStream::AllocateAudioBuffer - (Existing, no changes needed for this subtask)
+// CMiniportWaveRTLamaLoopbackStream::AllocateAudioBuffer - (Unchanged)
 //-----------------------------------------------------------------------------
 STDMETHODIMP_(NTSTATUS)
 CMiniportWaveRTLamaLoopbackStream::AllocateAudioBuffer(_In_ ULONG RequestedSize, _Out_ PMDL *AudioBufferMdl, _Out_ ULONG *ActualSize, _Out_ ULONG *OffsetFromFirstPage, _Out_ MEMORY_CACHING_TYPE *CacheType)
 { ASSERT(ActualSize); ASSERT(AudioBufferMdl); ASSERT(OffsetFromFirstPage); ASSERT(CacheType); if (!m_pPortStream || !m_pDataFormat) return STATUS_INVALID_DEVICE_STATE; NTSTATUS ntStatus = STATUS_SUCCESS; ULONG ulBlockAlign = m_pDataFormat->WaveFormatEx.nBlockAlign; if (ulBlockAlign == 0) ulBlockAlign = (m_ulChannelCount * m_ulBitsPerSample) / 8; if (ulBlockAlign == 0) ulBlockAlign = 1; ULONG ulAdjustedRequestedSize = RequestedSize; if (ulAdjustedRequestedSize % ulBlockAlign != 0) { ulAdjustedRequestedSize = ((ulAdjustedRequestedSize / ulBlockAlign) + 1) * ulBlockAlign; } if (ulAdjustedRequestedSize == 0) { ulAdjustedRequestedSize = (m_ulSampleRate * ulBlockAlign * LAMA_DEFAULT_PACKET_SIZE_MS) / 1000; if (ulAdjustedRequestedSize < ulBlockAlign) ulAdjustedRequestedSize = ulBlockAlign; if (ulAdjustedRequestedSize % ulBlockAlign != 0){ ulAdjustedRequestedSize = ((ulAdjustedRequestedSize / ulBlockAlign) + 1) * ulBlockAlign; } } if (ulAdjustedRequestedSize > m_ulMaxBufferSize) { ulAdjustedRequestedSize = m_ulMaxBufferSize; ulAdjustedRequestedSize -= (ulAdjustedRequestedSize % ulBlockAlign); } if (m_pAudioBufferMdl) { FreeAudioBuffer(m_pAudioBufferMdl, m_ulCurrentBufferSize); } ntStatus = m_pPortStream->AllocatePagesForMdl(ulAdjustedRequestedSize, AudioBufferMdl, ActualSize, OffsetFromFirstPage); if (!NT_SUCCESS(ntStatus)) { DPF(DPF_LEVEL_ERROR, ("AllocateAudioBuffer: AllocatePagesForMdl failed 0x%x", ntStatus)); m_ulCurrentBufferSize = 0; m_pAudioBufferMdl = NULL; m_pAudioBuffer = NULL; return ntStatus; } m_pAudioBufferMdl = *AudioBufferMdl; m_ulCurrentBufferSize = *ActualSize; if (m_pAudioBufferMdl) { m_pAudioBuffer = MmGetSystemAddressForMdlSafe(m_pAudioBufferMdl, NormalPoolPriority); if (!m_pAudioBuffer) { DPF(DPF_LEVEL_ERROR, ("AllocateAudioBuffer: MmGetSystemAddressForMdlSafe failed.")); m_pPortStream->FreePagesFromMdl(m_pAudioBufferMdl); m_pAudioBufferMdl = NULL; m_ulCurrentBufferSize = 0; return STATUS_INSUFFICIENT_RESOURCES; } } else { m_pAudioBuffer = NULL; } *CacheType = MmCached; m_ullPlayPosition = 0; m_ullWritePosition = 0; DPF(DPF_LEVEL_INFO, ("AllocateAudioBuffer: Req=%u, AdjReq=%u, Actual=%u, VA=0x%p", RequestedSize, ulAdjustedRequestedSize, *ActualSize, m_pAudioBuffer)); return ntStatus; }
 
 //-----------------------------------------------------------------------------
-// CMiniportWaveRTLamaLoopbackStream::FreeAudioBuffer - (Existing, no changes needed for this subtask)
+// CMiniportWaveRTLamaLoopbackStream::FreeAudioBuffer - (Unchanged)
 //-----------------------------------------------------------------------------
 STDMETHODIMP_(VOID)
 CMiniportWaveRTLamaLoopbackStream::FreeAudioBuffer(_In_opt_ PMDL AudioBufferMdlParam, _In_ ULONG BufferSizeParam)
@@ -275,134 +293,246 @@ CMiniportWaveRTLamaLoopbackStream::FreeAudioBuffer(_In_opt_ PMDL AudioBufferMdlP
 
 //-----------------------------------------------------------------------------
 // CMiniportWaveRTLamaLoopbackStream::ProcessRenderDataFromWaveRtBuffer
+// MODIFIED for Strategy A: Upmix client data to 16 channels in shared buffer
 //-----------------------------------------------------------------------------
 VOID CMiniportWaveRTLamaLoopbackStream::ProcessRenderDataFromWaveRtBuffer
 (
-    ULONG ulBufferOffset, 
-    ULONG ulByteCount
+    ULONG ulBufferOffset, // Offset in m_pAudioBuffer (client's WaveRT buffer)
+    ULONG ulByteCount     // Byte count in client's format (e.g., stereo, 16-bit)
 )
 {
     KIRQL oldIrql;
     PLAMA_SHARED_LOOPBACK_BUFFER pCurrentBuffer = &g_InstanceLoopbackBuffers[m_instanceIndex];
 
-    if (m_bCapture) return; 
+    if (m_bCapture) return; // This is for render path
     if (!pCurrentBuffer->bInitialized || !pCurrentBuffer->pBuffer || !m_pAudioBuffer || ulByteCount == 0)
     {
-        DPF(DPF_LEVEL_WARNING, ("ProcessRenderData (Inst %u): Not initialized or no data. SharedInit=%d, SharedBuf=0x%p, WaveRtBuf=0x%p, Count=%u", 
+        DPF(DPF_LEVEL_WARNING, ("ProcessRenderData (Inst %u): Not initialized or no data. SharedInit=%d, SharedBuf=0x%p, WaveRtBuf=0x%p, Count=%u",
             m_instanceIndex, pCurrentBuffer->bInitialized, pCurrentBuffer->pBuffer, m_pAudioBuffer, ulByteCount));
         return;
     }
 
-    PBYTE pSourceData = (PBYTE)m_pAudioBuffer + ulBufferOffset;
-    
-    KeAcquireSpinLock(&pCurrentBuffer->SpinLock, &oldIrql);
-
-    ULONG currentWritePos = InterlockedCompareExchange((PLONG)&pCurrentBuffer->ulWritePointer, 0, 0); 
-    ULONG currentReadPos = InterlockedCompareExchange((PLONG)&pCurrentBuffer->ulReadPointer, 0, 0);  
-    
-    ULONG occupiedBytes = currentWritePos - currentReadPos; 
-    ULONG freeBytes = pCurrentBuffer->ulBufferSize - occupiedBytes;
-
-    if (ulByteCount > freeBytes)
-    {
-        DPF(DPF_LEVEL_WARNING, ("ProcessRenderData (Inst %u): Shared buffer overflow. Dropping %u bytes. Free: %u", m_instanceIndex, ulByteCount, freeBytes));
-        KeReleaseSpinLock(&pCurrentBuffer->SpinLock, oldIrql);
-        return; 
-    }
-
-    ULONG writeIdx = currentWritePos & (pCurrentBuffer->ulBufferSize - 1); 
-    ULONG bytesToEndOfBuffer = pCurrentBuffer->ulBufferSize - writeIdx;
-
-    if (ulByteCount <= bytesToEndOfBuffer)
-    {
-        RtlCopyMemory(pCurrentBuffer->pBuffer + writeIdx, pSourceData, ulByteCount);
-    }
-    else
-    {
-        RtlCopyMemory(pCurrentBuffer->pBuffer + writeIdx, pSourceData, bytesToEndOfBuffer);
-        RtlCopyMemory(pCurrentBuffer->pBuffer, pSourceData + bytesToEndOfBuffer, ulByteCount - bytesToEndOfBuffer);
-    }
-
-    InterlockedExchangeAdd((PLONG)&pCurrentBuffer->ulWritePointer, ulByteCount);
-    
-    KeReleaseSpinLock(&pCurrentBuffer->SpinLock, oldIrql);
-
-    m_ullPlayPosition = (m_ullPlayPosition + ulByteCount) % m_ulCurrentBufferSize; 
-    m_ullWritePosition = (m_ullWritePosition + ulByteCount) % m_ulCurrentBufferSize; 
-
-    DPF(DPF_LEVEL_TRACE, ("ProcessRenderData (Inst %u): Copied %u bytes to shared buffer. New SharedWritePtr: %u (masked %u)", 
-        m_instanceIndex, ulByteCount, pCurrentBuffer->ulWritePointer, pCurrentBuffer->ulWritePointer & (pCurrentBuffer->ulBufferSize-1) ));
-}
-
-
-//-----------------------------------------------------------------------------
-// CMiniportWaveRTLamaLoopbackStream::FetchCaptureDataToWaveRtBuffer
-//-----------------------------------------------------------------------------
-VOID CMiniportWaveRTLamaLoopbackStream::FetchCaptureDataToWaveRtBuffer
-(
-    ULONG ulBufferOffset, 
-    ULONG ulByteCount
-)
-{
-    KIRQL oldIrql;
-    PLAMA_SHARED_LOOPBACK_BUFFER pCurrentBuffer = &g_InstanceLoopbackBuffers[m_instanceIndex];
-
-    if (!m_bCapture) return; 
-    if (!pCurrentBuffer->bInitialized || !pCurrentBuffer->pBuffer || !m_pAudioBuffer || ulByteCount == 0)
-    {
-         DPF(DPF_LEVEL_WARNING, ("FetchCaptureData (Inst %u): Not initialized or no data request. SharedInit=%d, SharedBuf=0x%p, WaveRtBuf=0x%p, Count=%u", 
-            m_instanceIndex, pCurrentBuffer->bInitialized, pCurrentBuffer->pBuffer, m_pAudioBuffer, ulByteCount));
+    // Sanity checks for client format
+    if (m_ulChannelCount == 0 || m_ulBitsPerSample == 0) {
+        DPF(DPF_LEVEL_ERROR, ("ProcessRenderData (Inst %u): Client format not set (Ch=%u, Bits=%u). Aborting.", m_instanceIndex, m_ulChannelCount, m_ulBitsPerSample));
         return;
     }
-    
-    PBYTE pDestData = (PBYTE)m_pAudioBuffer + ulBufferOffset;
-    ULONG bytesCopiedFromShared = 0;
+    if (m_ulBitsPerSample != INTERNAL_DRIVER_BITS_PER_SAMPLE) {
+         DPF(DPF_LEVEL_ERROR, ("ProcessRenderData (Inst %u): Client BitsPerSample (%u) does not match internal (%u). Aborting.",
+            m_instanceIndex, m_ulBitsPerSample, INTERNAL_DRIVER_BITS_PER_SAMPLE));
+        return;
+    }
+
+    PBYTE pSourceClientData = (PBYTE)m_pAudioBuffer + ulBufferOffset;
+    USHORT clientSampleSize = (USHORT)(m_ulBitsPerSample / 8); // Bytes per sample
+    ULONG clientFrameSize = m_ulChannelCount * clientSampleSize;
+    ULONG numFrames = ulByteCount / clientFrameSize;
+
+    if (numFrames == 0) {
+        DPF(DPF_LEVEL_INFO, ("ProcessRenderData (Inst %u): Zero frames to process from ulByteCount %u.", m_instanceIndex, ulByteCount));
+        return;
+    }
+
+    USHORT driverSampleSize = (USHORT)(INTERNAL_DRIVER_BITS_PER_SAMPLE / 8);
+    ULONG driverFrameSize = INTERNAL_DRIVER_CHANNELS * driverSampleSize;
+    ULONG totalDriverBytesToWrite = numFrames * driverFrameSize;
 
     KeAcquireSpinLock(&pCurrentBuffer->SpinLock, &oldIrql);
 
     ULONG currentWritePos = InterlockedCompareExchange((PLONG)&pCurrentBuffer->ulWritePointer, 0, 0);
     ULONG currentReadPos = InterlockedCompareExchange((PLONG)&pCurrentBuffer->ulReadPointer, 0, 0);
-    ULONG availableBytesInShared = currentWritePos - currentReadPos; 
+    ULONG occupiedBytes = currentWritePos - currentReadPos;
+    ULONG freeBytesInShared = pCurrentBuffer->ulBufferSize - occupiedBytes;
 
-    if (availableBytesInShared > 0)
+    if (totalDriverBytesToWrite > freeBytesInShared)
     {
-        bytesCopiedFromShared = min(ulByteCount, availableBytesInShared);
-        
-        ULONG readIdx = currentReadPos & (pCurrentBuffer->ulBufferSize - 1); 
-        ULONG bytesToEndOfBuffer = pCurrentBuffer->ulBufferSize - readIdx;
-
-        if (bytesCopiedFromShared <= bytesToEndOfBuffer)
-        {
-            RtlCopyMemory(pDestData, pCurrentBuffer->pBuffer + readIdx, bytesCopiedFromShared);
-        }
-        else
-        {
-            RtlCopyMemory(pDestData, pCurrentBuffer->pBuffer + readIdx, bytesToEndOfBuffer);
-            RtlCopyMemory(pDestData + bytesToEndOfBuffer, pCurrentBuffer->pBuffer, bytesCopiedFromShared - bytesToEndOfBuffer);
-        }
-        
-        InterlockedExchangeAdd((PLONG)&pCurrentBuffer->ulReadPointer, bytesCopiedFromShared);
+        DPF(DPF_LEVEL_WARNING, ("ProcessRenderData (Inst %u): Shared buffer overflow. Need %u, Free: %u. Dropping %u frames.",
+            m_instanceIndex, totalDriverBytesToWrite, freeBytesInShared, numFrames));
+        KeReleaseSpinLock(&pCurrentBuffer->SpinLock, oldIrql);
+        // Advance WaveRT buffer positions even if data is dropped
+        m_ullPlayPosition = (m_ullPlayPosition + ulByteCount) % m_ulCurrentBufferSize;
+        m_ullWritePosition = (m_ullWritePosition + ulByteCount) % m_ulCurrentBufferSize;
+        return;
     }
-    
+
+    PBYTE pClientFrame = pSourceClientData;
+    for (ULONG i = 0; i < numFrames; ++i)
+    {
+        ULONG writeIdxShared = (currentWritePos + (i * driverFrameSize)) & (pCurrentBuffer->ulBufferSize - 1);
+        PBYTE pDestDriverFrameStart = pCurrentBuffer->pBuffer + writeIdxShared;
+
+        // Copy client channels
+        ULONG clientBytesThisFrame = m_ulChannelCount * clientSampleSize;
+        ULONG driverBytesToEndOfBuffer = pCurrentBuffer->ulBufferSize - writeIdxShared;
+
+        if (driverFrameSize <= driverBytesToEndOfBuffer) // Whole driver frame fits without wrap
+        {
+            // Copy client data to start of driver frame
+            RtlCopyMemory(pDestDriverFrameStart, pClientFrame, clientBytesThisFrame);
+            // Zero out remaining channels in driver frame
+            if (INTERNAL_DRIVER_CHANNELS > m_ulChannelCount) {
+                RtlZeroMemory(pDestDriverFrameStart + clientBytesThisFrame,
+                              (INTERNAL_DRIVER_CHANNELS - m_ulChannelCount) * driverSampleSize);
+            }
+        }
+        else // Driver frame wraps around the shared buffer
+        {
+            PBYTE currentDestPtr = pDestDriverFrameStart;
+            ULONG remainingDriverFrameBytes = driverFrameSize;
+
+            // Part 1: Copy client channels, handling potential wrap for client data within driver frame part 1
+            ULONG clientBytesToCopyPart1 = min(clientBytesThisFrame, driverBytesToEndOfBuffer);
+            RtlCopyMemory(currentDestPtr, pClientFrame, clientBytesToCopyPart1);
+            currentDestPtr += clientBytesToCopyPart1;
+            remainingDriverFrameBytes -= clientBytesToCopyPart1;
+
+            if (clientBytesToCopyPart1 < clientBytesThisFrame) { // Client data itself wrapped
+                ULONG clientBytesRemaining = clientBytesThisFrame - clientBytesToCopyPart1;
+                RtlCopyMemory(pCurrentBuffer->pBuffer, pClientFrame + clientBytesToCopyPart1, clientBytesRemaining);
+                currentDestPtr = pCurrentBuffer->pBuffer + clientBytesRemaining;
+                remainingDriverFrameBytes -= clientBytesRemaining;
+            }
+
+            // Part 2: Zero out remaining driver channels, handling wrap
+            if (INTERNAL_DRIVER_CHANNELS > m_ulChannelCount) {
+                ULONG silenceBytes = (INTERNAL_DRIVER_CHANNELS - m_ulChannelCount) * driverSampleSize;
+                while (silenceBytes > 0) {
+                    if (currentDestPtr >= pCurrentBuffer->pBuffer + pCurrentBuffer->ulBufferSize) { // ensure currentDestPtr wraps if needed
+                        currentDestPtr = pCurrentBuffer->pBuffer;
+                    }
+                    ULONG bytesToZeroThisSegment = min(silenceBytes, (ULONG)(pCurrentBuffer->pBuffer + pCurrentBuffer->ulBufferSize - currentDestPtr));
+                    RtlZeroMemory(currentDestPtr, bytesToZeroThisSegment);
+                    currentDestPtr += bytesToZeroThisSegment;
+                    silenceBytes -= bytesToZeroThisSegment;
+                }
+            }
+        }
+        pClientFrame += clientFrameSize; // Move to next client frame
+    }
+
+    InterlockedExchangeAdd((PLONG)&pCurrentBuffer->ulWritePointer, totalDriverBytesToWrite);
     KeReleaseSpinLock(&pCurrentBuffer->SpinLock, oldIrql);
 
-    if (bytesCopiedFromShared < ulByteCount)
-    {
-        RtlZeroMemory(pDestData + bytesCopiedFromShared, ulByteCount - bytesCopiedFromShared);
-        DPF(DPF_LEVEL_INFO, ("FetchCaptureData (Inst %u): Shared buffer underrun. Copied %u, Silenced %u bytes.", 
-            m_instanceIndex, bytesCopiedFromShared, ulByteCount - bytesCopiedFromShared));
-    }
+    // Advance WaveRT buffer positions by client byte count
+    m_ullPlayPosition = (m_ullPlayPosition + ulByteCount) % m_ulCurrentBufferSize;
+    m_ullWritePosition = (m_ullWritePosition + ulByteCount) % m_ulCurrentBufferSize;
 
-    m_ullWritePosition = (m_ullWritePosition + ulByteCount) % m_ulCurrentBufferSize; 
-    m_ullPlayPosition = m_ullWritePosition; 
-
-    DPF(DPF_LEVEL_TRACE, ("FetchCaptureData (Inst %u): Copied %u bytes from shared. New SharedReadPtr: %u (masked %u)", 
-        m_instanceIndex, bytesCopiedFromShared, pCurrentBuffer->ulReadPointer, pCurrentBuffer->ulReadPointer & (pCurrentBuffer->ulBufferSize-1) ));
+    DPF(DPF_LEVEL_TRACE, ("ProcessRenderData (Inst %u, %u ch client): Copied %u frames (%u client bytes) as %u driver bytes to shared. New SharedWritePtr: %u",
+        m_instanceIndex, m_ulChannelCount, numFrames, ulByteCount, totalDriverBytesToWrite, pCurrentBuffer->ulWritePointer));
 }
 
 
 //-----------------------------------------------------------------------------
-// CMiniportWaveRTLamaLoopbackStream::NotificationDpcRoutine - (Existing, logic remains similar but would use instance index if it directly accessed shared buffer)
+// CMiniportWaveRTLamaLoopbackStream::FetchCaptureDataToWaveRtBuffer
+// (Largely Unchanged for Strategy A, but ensure it correctly handles reading
+//  m_ulChannelCount from the 16-channel shared buffer)
+//-----------------------------------------------------------------------------
+VOID CMiniportWaveRTLamaLoopbackStream::FetchCaptureDataToWaveRtBuffer
+(
+    ULONG ulBufferOffset, // Offset in m_pAudioBuffer (client's WaveRT buffer)
+    ULONG ulByteCount     // Byte count in client's format (e.g., stereo, 16-bit)
+)
+{
+    KIRQL oldIrql;
+    PLAMA_SHARED_LOOPBACK_BUFFER pCurrentBuffer = &g_InstanceLoopbackBuffers[m_instanceIndex];
+
+    if (!m_bCapture) return; // This is for capture path
+    if (!pCurrentBuffer->bInitialized || !pCurrentBuffer->pBuffer || !m_pAudioBuffer || ulByteCount == 0)
+    {
+         DPF(DPF_LEVEL_WARNING, ("FetchCaptureData (Inst %u): Not initialized or no data request. SharedInit=%d, SharedBuf=0x%p, WaveRtBuf=0x%p, Count=%u",
+            m_instanceIndex, pCurrentBuffer->bInitialized, pCurrentBuffer->pBuffer, m_pAudioBuffer, ulByteCount));
+        return;
+    }
+
+    // Sanity checks for client format
+    if (m_ulChannelCount == 0 || m_ulBitsPerSample == 0) {
+        DPF(DPF_LEVEL_ERROR, ("FetchCaptureData (Inst %u): Client format not set (Ch=%u, Bits=%u). Silencing.", m_instanceIndex, m_ulChannelCount, m_ulBitsPerSample));
+        RtlZeroMemory((PBYTE)m_pAudioBuffer + ulBufferOffset, ulByteCount);
+        // Advance WaveRT buffer positions
+        m_ullWritePosition = (m_ullWritePosition + ulByteCount) % m_ulCurrentBufferSize;
+        m_ullPlayPosition = m_ullWritePosition;
+        return;
+    }
+    if (m_ulBitsPerSample != INTERNAL_DRIVER_BITS_PER_SAMPLE) {
+         DPF(DPF_LEVEL_ERROR, ("FetchCaptureData (Inst %u): Client BitsPerSample (%u) does not match internal (%u). Silencing.",
+            m_instanceIndex, m_ulBitsPerSample, INTERNAL_DRIVER_BITS_PER_SAMPLE));
+        RtlZeroMemory((PBYTE)m_pAudioBuffer + ulBufferOffset, ulByteCount);
+        m_ullWritePosition = (m_ullWritePosition + ulByteCount) % m_ulCurrentBufferSize;
+        m_ullPlayPosition = m_ullWritePosition;
+        return;
+    }
+
+    PBYTE pDestClientData = (PBYTE)m_pAudioBuffer + ulBufferOffset;
+    USHORT clientSampleSize = (USHORT)(m_ulBitsPerSample / 8);
+    ULONG clientFrameSize = m_ulChannelCount * clientSampleSize;
+    ULONG numFramesToClient = ulByteCount / clientFrameSize;
+
+    USHORT driverSampleSize = (USHORT)(INTERNAL_DRIVER_BITS_PER_SAMPLE / 8);
+    ULONG driverFrameSize = INTERNAL_DRIVER_CHANNELS * driverSampleSize;
+
+    ULONG totalBytesReadFromSharedActual = 0; // Actual client bytes copied
+
+    KeAcquireSpinLock(&pCurrentBuffer->SpinLock, &oldIrql);
+
+    ULONG currentWritePosShared = InterlockedCompareExchange((PLONG)&pCurrentBuffer->ulWritePointer, 0, 0);
+    ULONG currentReadPosShared = InterlockedCompareExchange((PLONG)&pCurrentBuffer->ulReadPointer, 0, 0);
+    ULONG availableDriverBytesInShared = currentWritePosShared - currentReadPosShared;
+    ULONG availableDriverFramesInShared = availableDriverBytesInShared / driverFrameSize;
+
+    ULONG framesToCopy = min(numFramesToClient, availableDriverFramesInShared);
+    ULONG bytesAdvancedInShared = 0;
+
+    if (framesToCopy > 0)
+    {
+        PBYTE pClientFrameDest = pDestClientData;
+        for (ULONG i = 0; i < framesToCopy; ++i)
+        {
+            ULONG readIdxShared = (currentReadPosShared + bytesAdvancedInShared) & (pCurrentBuffer->ulBufferSize - 1);
+            PBYTE pSourceDriverFrameStart = pCurrentBuffer->pBuffer + readIdxShared;
+            ULONG driverBytesToEndOfBuffer = pCurrentBuffer->ulBufferSize - readIdxShared;
+
+            if (driverFrameSize <= driverBytesToEndOfBuffer) // Whole driver frame is contiguous
+            {
+                RtlCopyMemory(pClientFrameDest, pSourceDriverFrameStart, clientFrameSize); // Copy only client's channel portion
+            }
+            else // Driver frame wraps in shared buffer
+            {
+                ULONG firstPartLen = driverBytesToEndOfBuffer;
+                if (clientFrameSize <= firstPartLen) { // Client part fits in first segment
+                    RtlCopyMemory(pClientFrameDest, pSourceDriverFrameStart, clientFrameSize);
+                } else { // Client part also wraps
+                    RtlCopyMemory(pClientFrameDest, pSourceDriverFrameStart, firstPartLen);
+                    RtlCopyMemory(pClientFrameDest + firstPartLen, pCurrentBuffer->pBuffer, clientFrameSize - firstPartLen);
+                }
+            }
+            pClientFrameDest += clientFrameSize;
+            bytesAdvancedInShared += driverFrameSize; // Advance by a full driver frame in shared buffer
+        }
+        InterlockedExchangeAdd((PLONG)&pCurrentBuffer->ulReadPointer, bytesAdvancedInShared);
+        totalBytesReadFromSharedActual = framesToCopy * clientFrameSize;
+    }
+
+    KeReleaseSpinLock(&pCurrentBuffer->SpinLock, oldIrql);
+
+    if (totalBytesReadFromSharedActual < ulByteCount)
+    {
+        // Silence the remaining part of the client's buffer
+        RtlZeroMemory(pDestClientData + totalBytesReadFromSharedActual, ulByteCount - totalBytesReadFromSharedActual);
+        DPF(DPF_LEVEL_INFO, ("FetchCaptureData (Inst %u): Shared buffer underrun. Copied %u client frames (%u bytes), Silenced %u bytes.",
+            m_instanceIndex, framesToCopy, totalBytesReadFromSharedActual, ulByteCount - totalBytesReadFromSharedActual));
+    }
+
+    // Advance WaveRT buffer positions
+    m_ullWritePosition = (m_ullWritePosition + ulByteCount) % m_ulCurrentBufferSize;
+    m_ullPlayPosition = m_ullWritePosition;
+
+    DPF(DPF_LEVEL_TRACE, ("FetchCaptureData (Inst %u, %u ch client): Copied %u client frames. New SharedReadPtr: %u",
+        m_instanceIndex, m_ulChannelCount, framesToCopy, pCurrentBuffer->ulReadPointer));
+}
+
+
+//-----------------------------------------------------------------------------
+// CMiniportWaveRTLamaLoopbackStream::NotificationDpcRoutine - (Unchanged)
 //-----------------------------------------------------------------------------
 _Use_decl_annotations_
 VOID CMiniportWaveRTLamaLoopbackStream::NotificationDpcRoutine
@@ -411,7 +541,7 @@ VOID CMiniportWaveRTLamaLoopbackStream::NotificationDpcRoutine
 
 #pragma code_seg("PAGE")
 //-----------------------------------------------------------------------------
-// Other IMiniportWaveRTStream methods - (Existing, no changes needed for this subtask)
+// Other IMiniportWaveRTStream methods - (Unchanged)
 //-----------------------------------------------------------------------------
 STDMETHODIMP_(NTSTATUS) CMiniportWaveRTLamaLoopbackStream::GetClock(_Out_ HANDLE *ClockHandle) { PAGED_CODE(); ASSERT(ClockHandle); if (!m_pPortStream) return STATUS_INVALID_DEVICE_STATE; *ClockHandle = m_pPortStream->GetClock(); return STATUS_SUCCESS; }
 STDMETHODIMP_(NTSTATUS) CMiniportWaveRTLamaLoopbackStream::GetHwLatency(_Out_ KSRTAUDIO_HWLATENCY *HwLatency) { PAGED_CODE(); ASSERT(HwLatency); HwLatency->FifoSize = m_pDataFormat ? m_pDataFormat->WaveFormatEx.nBlockAlign * 2 : 0; HwLatency->ChipsetDelay = 0; HwLatency->CodecDelay = 0; return STATUS_SUCCESS; }
@@ -427,9 +557,10 @@ STDMETHODIMP_(NTSTATUS) CMiniportWaveRTLamaLoopbackStream::SetVolume(_In_ ULONG 
 STDMETHODIMP_(NTSTATUS) CMiniportWaveRTLamaLoopbackStream::GetMute(_Out_ PBOOL pbValue) { PAGED_CODE(); UNREFERENCED_PARAMETER(pbValue); return STATUS_NOT_IMPLEMENTED; }
 STDMETHODIMP_(NTSTATUS) CMiniportWaveRTLamaLoopbackStream::SetMute(_In_ BOOL bValue) { PAGED_CODE(); UNREFERENCED_PARAMETER(bValue); return STATUS_NOT_IMPLEMENTED; }
 
-#pragma code_seg("NONPAGED") 
+#pragma code_seg("NONPAGED")
 //-----------------------------------------------------------------------------
 // CMiniportWaveRTLamaLoopbackStream::HandleWriteIRPData
+// (Unchanged - This path is used by the plugin which already provides 16ch data)
 //-----------------------------------------------------------------------------
 NTSTATUS
 CMiniportWaveRTLamaLoopbackStream::HandleWriteIRPData
@@ -462,11 +593,11 @@ CMiniportWaveRTLamaLoopbackStream::HandleWriteIRPData
     if (ulByteCount > freeBytes)
     {
         DPF(DPF_LEVEL_ERROR, ("HandleWriteIRPData (Inst %u): Shared buffer overflow. Requested: %u, Free: %u.", m_instanceIndex, ulByteCount, freeBytes));
-        ntStatus = STATUS_BUFFER_OVERFLOW; 
+        ntStatus = STATUS_BUFFER_OVERFLOW;
         goto Exit;
     }
 
-    ULONG writeIdx = currentWritePos & (pCurrentBuffer->ulBufferSize - 1); 
+    ULONG writeIdx = currentWritePos & (pCurrentBuffer->ulBufferSize - 1);
     ULONG bytesToEndOfBuffer = pCurrentBuffer->ulBufferSize - writeIdx;
 
     if (ulByteCount <= bytesToEndOfBuffer) { RtlCopyMemory((PBYTE)pCurrentBuffer->pBuffer + writeIdx, pData, ulByteCount); }
@@ -483,6 +614,7 @@ Exit:
 
 //-----------------------------------------------------------------------------
 // CMiniportWaveRTLamaLoopbackStream::HandleReadIRPData
+// (Unchanged - This path is used by the plugin which expects 16ch data)
 //-----------------------------------------------------------------------------
 NTSTATUS
 CMiniportWaveRTLamaLoopbackStream::HandleReadIRPData
@@ -514,7 +646,7 @@ CMiniportWaveRTLamaLoopbackStream::HandleReadIRPData
     if (availableDataInShared > 0)
     {
         bytesToCopy = min(ulReqSize, availableDataInShared);
-        ULONG readIdx = currentReadPos & (pCurrentBuffer->ulBufferSize - 1); 
+        ULONG readIdx = currentReadPos & (pCurrentBuffer->ulBufferSize - 1);
         ULONG bytesToEndOfBuffer = pCurrentBuffer->ulBufferSize - readIdx;
         if (bytesToCopy <= bytesToEndOfBuffer) { RtlCopyMemory(pData, (PBYTE)pCurrentBuffer->pBuffer + readIdx, bytesToCopy); }
         else { RtlCopyMemory(pData, (PBYTE)pCurrentBuffer->pBuffer + readIdx, bytesToEndOfBuffer); RtlCopyMemory((PBYTE)pData + bytesToEndOfBuffer, (PBYTE)pCurrentBuffer->pBuffer, bytesToCopy - bytesToEndOfBuffer); }
@@ -522,11 +654,11 @@ CMiniportWaveRTLamaLoopbackStream::HandleReadIRPData
         *pulBytesCopied = bytesToCopy;
         DPF(DPF_LEVEL_INFO, ("HandleReadIRPData (Inst %u): Read %u bytes. New SharedReadPtr: %u", m_instanceIndex, bytesToCopy, pCurrentBuffer->ulReadPointer));
     } else { DPF(DPF_LEVEL_INFO, ("HandleReadIRPData (Inst %u): No data in shared buffer.",m_instanceIndex)); }
-    
+
     KeReleaseSpinLock(&pCurrentBuffer->SpinLock, oldIrql);
     DPF_LEAVE(("[CMiniportWaveRTLamaLoopbackStream::HandleReadIRPData] Inst: %u, ntStatus=0x%08x, BytesCopied=%u", m_instanceIndex, ntStatus, *pulBytesCopied));
     return ntStatus;
 }
-#pragma code_seg() 
+#pragma code_seg()
 
 // End of hdmitopo.cpp

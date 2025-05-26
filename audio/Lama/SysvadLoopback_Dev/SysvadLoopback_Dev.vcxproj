@@ -32,7 +32,7 @@
     <TargetVersion>Windows10</TargetVersion>
     <UseDebugLibraries>False</UseDebugLibraries>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
-    <DriverType>KMDF</DriverType>
+    <DriverType>WDM</DriverType>
     <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
     <ConfigurationType>Driver</ConfigurationType>
   </PropertyGroup>
@@ -49,8 +49,6 @@
     <UseDebugLibraries>True</UseDebugLibraries>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
     <DriverType>WDM</DriverType>
-    <DriverType>WDM</DriverType>
-    <DriverType>WDM</DriverType>
     <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
     <ConfigurationType>Driver</ConfigurationType>
   </PropertyGroup>
@@ -58,9 +56,6 @@
     <TargetVersion>Windows10</TargetVersion>
     <UseDebugLibraries>True</UseDebugLibraries>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
-    <DriverType>WDM</DriverType>
-    <DriverType>WDM</DriverType>
-    <DriverType>WDM</DriverType>
     <DriverType>WDM</DriverType>
     <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
     <ConfigurationType>Driver</ConfigurationType>
@@ -84,7 +79,8 @@
   <ItemGroup Label="WrappedTaskItems" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib;$(DDK_LIB_PATH)
+toskrnl.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
@@ -93,21 +89,27 @@
     </ResourceCompile>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..\..\sysvad\inc;..\..\sysvad\EndpointsCommon;.</AdditionalIncludeDirectories>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE;_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_</PreprocessorDefinitions>
+      <ExceptionHandling>
+      </ExceptionHandling>
     </ClCompile>
     <Midl>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE</PreprocessorDefinitions>
     </Midl>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib;$(DDK_LIB_PATH)
+toskrnl.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
@@ -116,21 +118,27 @@
     </ResourceCompile>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..\..\sysvad\inc;..\..\sysvad\EndpointsCommon;.</AdditionalIncludeDirectories>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE;_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_</PreprocessorDefinitions>
+      <ExceptionHandling>
+      </ExceptionHandling>
     </ClCompile>
     <Midl>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE</PreprocessorDefinitions>
     </Midl>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib;$(DDK_LIB_PATH)
+toskrnl.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
@@ -139,21 +147,27 @@
     </ResourceCompile>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..\..\sysvad\inc;..\..\sysvad\EndpointsCommon;.</AdditionalIncludeDirectories>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE;_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_</PreprocessorDefinitions>
+      <ExceptionHandling>
+      </ExceptionHandling>
     </ClCompile>
     <Midl>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE</PreprocessorDefinitions>
     </Midl>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib;$(DDK_LIB_PATH)
+toskrnl.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
@@ -162,17 +176,22 @@
     </ResourceCompile>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..\..\sysvad\inc;..\..\sysvad\EndpointsCommon;.</AdditionalIncludeDirectories>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE;_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_</PreprocessorDefinitions>
+      <ExceptionHandling>
+      </ExceptionHandling>
     </ClCompile>
     <Midl>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);DEBUG_LEVEL=DEBUGLVL_TERSE</PreprocessorDefinitions>
     </Midl>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
   </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <TargetName>SysvadLoopback_Dev</TargetName>
@@ -186,119 +205,9 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <TargetName>SysvadLoopback_Dev</TargetName>
   </PropertyGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);.\..\EndpointsCommon\$(IntDir)\EndpointsCommon.lib</AdditionalDependencies>
-    </Link>
-    <ClCompile>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <!--
-        Use one of the following pre-processor defines to select the right power management:
-                - _USE_IPortClsRuntimePower
-                - _USE_SingleComponentMultiFxStates
-        Note that the single-component/multi-state feature requires also a registry 
-        value set via the INF. The name of the registry value is SingleComponentMultiFxStates.
-        see INF file for more info.
-    -->
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon;.</AdditionalIncludeDirectories>
-      <ExceptionHandling>
-      </ExceptionHandling>
-    </ClCompile>
-    <Midl>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon</AdditionalIncludeDirectories>
-    </Midl>
-    <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon</AdditionalIncludeDirectories>
-    </ResourceCompile>
-    <DriverSign>
-      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
-    </DriverSign>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
-    <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);.\..\EndpointsCommon\$(IntDir)\EndpointsCommon.lib</AdditionalDependencies>
-    </Link>
-    <ClCompile>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon;.</AdditionalIncludeDirectories>
-      <ExceptionHandling>
-      </ExceptionHandling>
-    </ClCompile>
-    <Midl>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon</AdditionalIncludeDirectories>
-    </Midl>
-    <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon</AdditionalIncludeDirectories>
-    </ResourceCompile>
-    <DriverSign>
-      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
-    </DriverSign>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);.\..\EndpointsCommon\$(IntDir)\EndpointsCommon.lib</AdditionalDependencies>
-    </Link>
-    <ClCompile>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon;.</AdditionalIncludeDirectories>
-      <ExceptionHandling>
-      </ExceptionHandling>
-    </ClCompile>
-    <Midl>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon</AdditionalIncludeDirectories>
-    </Midl>
-    <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon</AdditionalIncludeDirectories>
-    </ResourceCompile>
-    <DriverSign>
-      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
-    </DriverSign>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
-    <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);.\..\EndpointsCommon\$(IntDir)\EndpointsCommon.lib</AdditionalDependencies>
-    </Link>
-    <ClCompile>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon;.</AdditionalIncludeDirectories>
-      <ExceptionHandling>
-      </ExceptionHandling>
-    </ClCompile>
-    <Midl>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon</AdditionalIncludeDirectories>
-    </Midl>
-    <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);_USE_WAVERT_;SYSVAD_BTH_BYPASS;SYSVAD_USB_SIDEBAND;_USE_IPortClsRuntimePower</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\EndpointsCommon</AdditionalIncludeDirectories>
-    </ResourceCompile>
-    <DriverSign>
-      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
-    </DriverSign>
-  </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\A2dpHpDevice.cpp" />
-    <ClCompile Include="..\adapter.cpp" />
-    <ClCompile Include="..\basetopo.cpp" />
-    <ClCompile Include="..\BthhfpDevice.cpp" />
-    <ClCompile Include="..\common.cpp" />
-    <ClCompile Include="..\hw.cpp" />
-    <ClCompile Include="..\kshelper.cpp" />
-    <ClCompile Include="..\savedata.cpp" />
-    <ClCompile Include="..\tonegenerator.cpp" />
-    <ClCompile Include="..\UsbHsDevice.cpp" />
-    <ClCompile Include="hdmitopo.cpp" /> <!-- Now contains lamaloopbackstream.cpp -->
-    <ClCompile Include="micintopo.cpp" /> <!-- Now contains lamaloopbackcapture.cpp -->
+    <ClCompile Include="hdmitopo.cpp" />
+    <ClCompile Include="micintopo.cpp" />
     <ClCompile Include="lamaloopbackrender.cpp" />
     <ClCompile Include="sharedbuffer.cpp" />
     <ResourceCompile Include="SysvadLoopback_Dev.rc" />
@@ -313,14 +222,11 @@
     <None Exclude="@(None)" Include="*.def;*.bat;*.hpj;*.asmx" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="hdmitopo.h" /> <!-- Now lamaloopbackstream.h -->
-    <ClInclude Include="micintopo.h" /> <!-- Now lamaloopbackcapture.h -->
+    <ClInclude Include="hdmitopo.h" />
+    <ClInclude Include="micintopo.h" />
     <ClInclude Include="lamaloopbackcommon.h" />
     <ClInclude Include="lamaloopbackrender.h" />
-    <ClInclude Include="minipairs.h" /> <!-- Overwritten with lamaloopbackminipairs.h content -->
-    <!-- Other headers from TabletAudioSample like hdmitoptable.h etc. are still present but not explicitly listed here. -->
-    <!-- The generic include below will pick them up if needed, or they can be added. -->
-    <ClInclude Exclude="@(ClInclude)" Include="*.h;*.hpp;*.hxx;*.hm;*.inl;*.xsd" />
+    <ClInclude Include="minipairs.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

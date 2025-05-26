@@ -1,4 +1,4 @@
-#include "LAMAConnectInterface_NEW.h" // Corrected to NEW.h for now
+#include "LAMAConnectInterface.h" // Corrected to NEW.h for now
 #include <windows.h>
 #include <winioctl.h>
 #include <ks.h>       
