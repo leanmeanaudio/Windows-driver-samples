@@ -89,7 +89,7 @@ toskrnl.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
     </ResourceCompile>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..\..\sysvad\inc;..\..\sysvad\EndpointsCommon;.</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);$(ProjectDir)Common;$(ProjectDir)EndpointsCommon;.</AdditionalIncludeDirectories>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
@@ -118,7 +118,7 @@ toskrnl.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
     </ResourceCompile>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..\..\sysvad\inc;..\..\sysvad\EndpointsCommon;.</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);$(ProjectDir)Common;$(ProjectDir)EndpointsCommon;.</AdditionalIncludeDirectories>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
@@ -147,7 +147,7 @@ toskrnl.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
     </ResourceCompile>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..\..\sysvad\inc;..\..\sysvad\EndpointsCommon;.</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);$(ProjectDir)Common;$(ProjectDir)EndpointsCommon;.</AdditionalIncludeDirectories>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>
@@ -176,7 +176,7 @@ toskrnl.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
     </ResourceCompile>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..\..\sysvad\inc;..\..\sysvad\EndpointsCommon;.</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);$(ProjectDir)Common;$(ProjectDir)EndpointsCommon;.</AdditionalIncludeDirectories>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION</PreprocessorDefinitions>

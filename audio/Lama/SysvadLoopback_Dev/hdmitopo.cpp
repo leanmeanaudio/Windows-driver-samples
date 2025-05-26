@@ -197,8 +197,8 @@ CMiniportWaveRTLamaLoopbackStream::Init
     {
         ExFreePoolWithTag(m_pDataFormat, LAMA_POOL_TAG);
     }
-    m_pDataFormat = (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE) ExAllocatePoolWithTag(
-                        NonPagedPoolNx, DataFormat->FormatSize, LAMA_POOL_TAG);
+    m_pDataFormat = (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE) ExAllocatePool2(
+                        POOL_FLAG_NON_PAGED, DataFormat->FormatSize, LAMA_POOL_TAG);
     if (!m_pDataFormat)
     {
         DPF(DPF_LEVEL_ERROR, ("Init: Failed to allocate memory for m_pDataFormat"));
@@ -247,7 +247,7 @@ CMiniportWaveRTLamaLoopbackStream::SetFormat
 
     if (m_pDataFormat) { ExFreePoolWithTag(m_pDataFormat, LAMA_POOL_TAG); m_pDataFormat = NULL; }
     if (m_pAudioBufferMdl) { FreeAudioBuffer(m_pAudioBufferMdl, m_ulCurrentBufferSize); /* Resets m_pAudioBufferMdl, m_pAudioBuffer, m_ulCurrentBufferSize */ }
-    m_pDataFormat = (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE) ExAllocatePoolWithTag(NonPagedPoolNx, DataFormat->FormatSize, LAMA_POOL_TAG);
+    m_pDataFormat = (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE) ExAllocatePool2(POOL_FLAG_NON_PAGED, DataFormat->FormatSize, LAMA_POOL_TAG);
     if (!m_pDataFormat) { DPF(DPF_LEVEL_ERROR, ("SetFormat: Failed to allocate memory for new m_pDataFormat")); ntStatus = STATUS_INSUFFICIENT_RESOURCES; goto Exit; }
     RtlCopyMemory(m_pDataFormat, DataFormat, DataFormat->FormatSize);
     // Update client's format

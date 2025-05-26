@@ -1,7 +1,11 @@
 #pragma once
 
+#include <wdm.h>
 #include <portcls.h>
+#include <ks.h>
 #include <ksmedia.h>
+#include <basetypes.h> // For BOOL
+
 #include "lamaloopbackcommon.h" // For LAMA_POOL_TAG, MIN/MAX_SAMPLE_RATE_PCM, LAMA_MAX_BUFFER_SIZE etc.
 
 #ifndef MAX_CHANNELS

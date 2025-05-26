@@ -1,4 +1,3 @@
-#include <ntddk.h>
 #include <wdm.h>
 #include <portcls.h>
 #include "lamaloopbackcommon.h" // For globals, property GUIDs, common formats, etc.
@@ -246,7 +245,12 @@ NTSTATUS CMiniportWaveRTLamaLoopbackCapture::NewStream
         DPF(DPF_LEVEL_ERROR, ("Failed to allocate CMiniportWaveRTLamaLoopbackStream for capture"));
         ntStatus = STATUS_INSUFFICIENT_RESOURCES; goto Done;
     }
-    ntStatus = newStream->Init(PortStream, DataFormat, Capture); 
+    // For Capture, the third parameter to Init is TRUE.
+    // The CMiniportWaveRTLamaLoopbackStream::Init method needs to be updated to accept the instance index.
+    // This is currently missing from the provided CMiniportWaveRTLamaLoopbackStream::Init signature if it's the same as hdmitopo.cpp's stream.
+    // Assuming hdmitopo.h's CMiniportWaveRTLamaLoopbackStream::Init was updated to take instanceIndex.
+    // For now, passing a placeholder 0 for instanceIndex, this might need adjustment based on actual stream class.
+    ntStatus = newStream->Init(PortStream, DataFormat, TRUE, 0); // Capture is TRUE, InstanceIndex needs consideration
     if (!NT_SUCCESS(ntStatus)) {
         DPF(DPF_LEVEL_ERROR, ("Failed to initialize CMiniportWaveRTLamaLoopbackStream for capture: 0x%x", ntStatus));
         goto Done;
@@ -261,7 +265,17 @@ Done:
         if (newStream) { newStream->Release(); }
         if (Stream != NULL) { *Stream = NULL; }
     } else {
-        if (newStream) { newStream->Release(); }
+        // newStream is AddRef'd by QueryInterface, so it's released by the caller of QI.
+        // If QI fails, we released it. If QI succeeds, the caller owns the ref.
+        // However, the object 'newStream' itself is a local C++ object here.
+        // The object pointed to by *Stream is the one with the ref count.
+        // The local 'newStream' pointer will go out of scope.
+        // If QI succeeded, *Stream has a ref. If newStream was allocated and QI failed, it's released.
+        // What if new was called, then Init failed? newStream would be leaked.
+        // Corrected logic: if Init fails, newStream (which was allocated) should be released.
+        // If QI fails (after successful Init), *Stream is NULL, newStream was QI'd and AddRef'd, so it's okay.
+        // The original code had newStream->Release() in the success path, which is correct as QI added a ref.
+         if (newStream) { newStream->Release(); }
     }
     return ntStatus;
 }

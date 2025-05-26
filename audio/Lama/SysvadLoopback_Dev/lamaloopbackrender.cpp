@@ -1,4 +1,3 @@
-#include <ntddk.h>
 #include <wdm.h>
 #include <initguid.h> // For DEFINE_GUID
 #include <ks.h>
