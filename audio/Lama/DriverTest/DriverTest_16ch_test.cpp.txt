@@ -1,37 +1,19 @@
-#include <windows.h> // Must be before setupapi.h
-#include <setupapi.h>
-#include <devguid.h> // For KSCATEGORY_AUDIO
-#include <cfgmgr32.h> 
-#pragma comment(lib, "Setupapi.lib")
 #include <iostream>
 #include <string>
 #include <vector>
-#include <setupapi.h>
-#include <devguid.h> // For KSCATEGORY_AUDIO
-#include <cfgmgr32.h> 
-#pragma comment(lib, "Setupapi.lib")
-#include <setupapi.h>
-#include <devguid.h> // For KSCATEGORY_AUDIO
-#include <cfgmgr32.h> 
-#pragma comment(lib, "Setupapi.lib")
+#include <windows.h>
 #include <winioctl.h> // For DeviceIoControl
-#include <setupapi.h>
-#include <devguid.h> // For KSCATEGORY_AUDIO
-#include <cfgmgr32.h> // For CR_SUCCESS, CM_Get_Parent_Ex, etc. (might be needed for friendly name)
-#pragma comment(lib, "Setupapi.lib")
-#include <setupapi.h>
-#include <devguid.h> // For KSCATEGORY_AUDIO
-#include <cfgmgr32.h> // For CR_SUCCESS, CM_Get_Parent_Ex, etc. (might be needed for friendly name)
-#pragma comment(lib, "Setupapi.lib")
 #include <ks.h>
 #include <ksmedia.h>
 #include <cmath> // For sin
 #include <sstream>   // For std::wstringstream
 #include "WavWriter.h" // Assuming this is in the same directory or include path is set
 
-// Placeholder device path construction.
-const std::wstring RENDER_DEVICE_BASENAME_TEST = L"\\\\.\\LamaLoopbackRender"; 
-const std::wstring CAPTURE_DEVICE_BASENAME_TEST = L"\\\\.\\LamaLoopbackCapture";
+// For SetupAPI
+#include <setupapi.h>
+#include <devguid.h>  // For KSCATEGORY_AUDIO
+#include <cfgmgr32.h> // For CR_SUCCESS etc.
+#pragma comment(lib, "Setupapi.lib")
 
 // Define KSPROPERTY_CONNECTION_DATAFORMAT if not available by default
 #ifndef KSPROPERTY_CONNECTION_DATAFORMAT
@@ -63,41 +45,101 @@ typedef struct {
     ULONG      SampleRate;
 } KSPROPERTY_LAMA_SAMPLE_RATE_S;
 
-
-std::wstring GetDevicePath(int deviceIndex, bool isRender) {
-    std::wstringstream ss;
-    if (isRender) {
-        ss << RENDER_DEVICE_BASENAME_TEST << deviceIndex;
-    } else {
-        ss << CAPTURE_DEVICE_BASENAME_TEST << deviceIndex;
-    }
-    return ss.str();
-}
-
 void LogError(const std::wstring& message, DWORD errorCode) {
     std::wcerr << message << L" Error Code: " << errorCode << std::endl;
 }
 
-void testSampleRateControl(int deviceIndex) {
-    std::wcout << L"--- Starting Sample Rate Control Test for Instance " << deviceIndex << L" ---" << std::endl;
-    std::wstring renderPath = GetDevicePath(deviceIndex, true);
+// Function to get the friendly name of a device instance
+std::wstring GetDeviceFriendlyName(DEVINST devInst) {
+    wchar_t buffer[MAX_DEVICE_ID_LEN];
+    CONFIGRET cr = CM_Get_DevNode_Registry_Property_ExW(devInst, CM_DRP_FRIENDLYNAME, nullptr, (PULONG)buffer, (PULONG)&(sizeof(buffer)), 0, nullptr);
+    if (cr == CR_SUCCESS) {
+        return std::wstring(buffer);
+    }
+    // Fallback to device description if friendly name is not available
+    cr = CM_Get_DevNode_Registry_Property_ExW(devInst, CM_DRP_DEVICEDESC, nullptr, (PULONG)buffer, (PULONG)&(sizeof(buffer)), 0, nullptr);
+    if (cr == CR_SUCCESS) {
+        return std::wstring(buffer);
+    }
+    return L"";
+}
 
-    HANDLE hDevice = CreateFileW(renderPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+bool GetDevicePath(const GUID& interfaceGuid, const std::wstring& nameSubstring, std::wstring& outDevicePath) {
+    HDEVINFO hDevInfo = SetupDiGetClassDevs(&interfaceGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (hDevInfo == INVALID_HANDLE_VALUE) {
+        std::cerr << "Failed to get device information set. Error: " << GetLastError() << std::endl;
+        return false;
+    }
+
+    SP_DEVICE_INTERFACE_DATA deviceInterfaceData;
+    deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+    for (DWORD i = 0; SetupDiEnumDeviceInterfaces(hDevInfo, NULL, &interfaceGuid, i, &deviceInterfaceData); ++i) {
+        DWORD requiredSize = 0;
+        SetupDiGetDeviceInterfaceDetail(hDevInfo, &deviceInterfaceData, NULL, 0, &requiredSize, NULL);
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+            // This error is expected on the first call to get the size.
+        }
+
+        std::vector<BYTE> detailBuffer(requiredSize);
+        PSP_DEVICE_INTERFACE_DETAIL_DATA_W deviceInterfaceDetailData = (PSP_DEVICE_INTERFACE_DETAIL_DATA_W)detailBuffer.data();
+        deviceInterfaceDetailData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
+        
+        SP_DEVINFO_DATA deviceInfoData;
+        deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+
+        if (!SetupDiGetDeviceInterfaceDetail(hDevInfo, &deviceInterfaceData, deviceInterfaceDetailData, requiredSize, &requiredSize, &deviceInfoData)) {
+            continue;
+        }
+
+        std::wstring currentDevicePath = deviceInterfaceDetailData->DevicePath;
+        std::wstring friendlyName = GetDeviceFriendlyName(deviceInfoData.DevInst);
+        
+        std::wcout << L"  [Discovery] Found: " << friendlyName << L" (" << currentDevicePath << L")" << std::endl;
+
+        if (!friendlyName.empty() && friendlyName.find(nameSubstring) != std::wstring::npos) {
+            outDevicePath = currentDevicePath;
+            SetupDiDestroyDeviceInfoList(hDevInfo);
+            std::wcout << L"  [Discovery] Matched (Friendly Name): " << friendlyName << std::endl;
+            return true;
+        }
+        
+        std::wstring nameSubstringLower = nameSubstring;
+        for(wchar_t &c : nameSubstringLower) c = towlower(c);
+        std::wstring currentDevicePathLower = currentDevicePath;
+        for(wchar_t &c : currentDevicePathLower) c = towlower(c);
+
+        if (currentDevicePathLower.find(nameSubstringLower) != std::wstring::npos) {
+             outDevicePath = currentDevicePath;
+             SetupDiDestroyDeviceInfoList(hDevInfo);
+             std::wcout << L"  [Discovery] Matched (Device Path Substring): " << currentDevicePath << std::endl;
+             return true;
+        }
+    }
+
+    SetupDiDestroyDeviceInfoList(hDevInfo);
+    std::wcerr << L"  [Discovery] Device containing '" << nameSubstring << L"' not found." << std::endl;
+    return false; 
+}
+
+
+void testSampleRateControl(LPCWSTR devicePath) {
+    std::wcout << L"--- Starting Sample Rate Control Test for " << devicePath << L" ---" << std::endl;
+
+    HANDLE hDevice = CreateFileW(devicePath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hDevice == INVALID_HANDLE_VALUE) {
-        LogError(L"  SampleRateTest: Failed to open Render device.", GetLastError());
+        LogError(L"  SampleRateTest: Failed to open device.", GetLastError());
         return;
     }
-    std::wcout << L"  SampleRateTest: Render device opened." << std::endl;
+    std::wcout << L"  SampleRateTest: Device opened." << std::endl;
 
     KSPROPERTY_LAMA_SAMPLE_RATE_S srProp;
     ZeroMemory(&srProp, sizeof(srProp));
     srProp.Property.Set = KSPROPSETID_LamaLoopback; 
     srProp.Property.Id = KSPROPERTY_LAMA_SAMPLE_RATE;
     srProp.Property.Flags = KSPROPERTY_TYPE_GET;
-
     DWORD bytesReturned;
 
-    // GET current sample rate
     std::wcout << L"  SampleRateTest: Attempting to GET current sample rate..." << std::endl;
     if (DeviceIoControl(hDevice, IOCTL_KS_PROPERTY, &srProp.Property, sizeof(KSPROPERTY), &srProp, sizeof(KSPROPERTY_LAMA_SAMPLE_RATE_S), &bytesReturned, NULL)) {
         if (bytesReturned >= sizeof(ULONG)) { 
@@ -109,15 +151,12 @@ void testSampleRateControl(int deviceIndex) {
         LogError(L"  SampleRateTest: Failed to GET current sample rate.", GetLastError());
     }
 
-    // SET new sample rate (e.g., 44100 Hz)
     ULONG newRate = 44100;
     std::wcout << L"  SampleRateTest: Attempting to SET sample rate to " << newRate << L" Hz..." << std::endl;
     srProp.Property.Flags = KSPROPERTY_TYPE_SET;
     srProp.SampleRate = newRate;
     if (DeviceIoControl(hDevice, IOCTL_KS_PROPERTY, &srProp, sizeof(KSPROPERTY_LAMA_SAMPLE_RATE_S), NULL, 0, &bytesReturned, NULL)) {
         std::wcout << L"  SampleRateTest: SET sample rate to " << newRate << L" Hz successful." << std::endl;
-
-        // GET again to verify
         srProp.Property.Flags = KSPROPERTY_TYPE_GET;
         std::wcout << L"  SampleRateTest: Attempting to GET sample rate again..." << std::endl;
         if (DeviceIoControl(hDevice, IOCTL_KS_PROPERTY, &srProp.Property, sizeof(KSPROPERTY), &srProp, sizeof(KSPROPERTY_LAMA_SAMPLE_RATE_S), &bytesReturned, NULL)) {
@@ -133,15 +172,12 @@ void testSampleRateControl(int deviceIndex) {
         LogError(L"  SampleRateTest: Failed to SET sample rate to " + std::to_wstring(newRate) + L" Hz.", GetLastError());
     }
     
-    // SET another sample rate (e.g., 48000 Hz, assuming it's supported)
     newRate = 48000; 
     std::wcout << L"  SampleRateTest: Attempting to SET sample rate to " << newRate << L" Hz..." << std::endl;
     srProp.Property.Flags = KSPROPERTY_TYPE_SET;
     srProp.SampleRate = newRate;
     if (DeviceIoControl(hDevice, IOCTL_KS_PROPERTY, &srProp, sizeof(KSPROPERTY_LAMA_SAMPLE_RATE_S), NULL, 0, &bytesReturned, NULL)) {
         std::wcout << L"  SampleRateTest: SET sample rate to " << newRate << L" Hz successful." << std::endl;
-
-        // GET again to verify
         srProp.Property.Flags = KSPROPERTY_TYPE_GET;
         std::wcout << L"  SampleRateTest: Attempting to GET sample rate again..." << std::endl;
         if (DeviceIoControl(hDevice, IOCTL_KS_PROPERTY, &srProp.Property, sizeof(KSPROPERTY), &srProp, sizeof(KSPROPERTY_LAMA_SAMPLE_RATE_S), &bytesReturned, NULL)) {
@@ -158,11 +194,9 @@ void testSampleRateControl(int deviceIndex) {
     }
 
     CloseHandle(hDevice);
-    std::wcout << L"--- Sample Rate Control Test for Instance " << deviceIndex << L" Finished ---" << std::endl;
+    std::wcout << L"--- Sample Rate Control Test for " << devicePath << L" Finished ---" << std::endl;
 }
 
-
-// Generates a sine wave and returns it as a vector of interleaved int16_t samples
 std::vector<int16_t> generateSineWave(double frequency, double duration, 
                                       uint32_t sampleRate, uint16_t numChannels, double amplitude = 0.8) {
     std::vector<int16_t> audioData;
@@ -183,20 +217,19 @@ std::vector<int16_t> generateSineWave(double frequency, double duration,
     return audioData;
 }
 
-void testAudioLoopback(int deviceIndex, uint16_t numChannelsToTest, const std::string& wavFileSuffix) {
-    std::wcout << L"--- Starting Audio Loopback Test (" << numChannelsToTest << L" ch) for Instance " << deviceIndex << L" ---" << std::endl;
+void testAudioLoopback(LPCWSTR renderDevicePath, LPCWSTR captureDevicePath, uint16_t numChannelsToTest, const std::string& wavFileSuffix) {
+    std::wcout << L"--- Starting Audio Loopback Test (" << numChannelsToTest << L" ch) ---" << std::endl;
+    std::wcout << L"  Render Device: " << renderDevicePath << std::endl;
+    std::wcout << L"  Capture Device: " << captureDevicePath << std::endl;
 
-    std::wstring renderPath = GetDevicePath(deviceIndex, true);
-    std::wstring capturePath = GetDevicePath(deviceIndex, false);
-
-    HANDLE hRenderDevice = CreateFileW(renderPath.c_str(), GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hRenderDevice = CreateFileW(renderDevicePath, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hRenderDevice == INVALID_HANDLE_VALUE) {
         LogError(L"  LoopbackTest: Failed to open Render device.", GetLastError());
         return;
     }
     std::wcout << L"  LoopbackTest: Render device opened." << std::endl;
 
-    HANDLE hCaptureDevice = CreateFileW(capturePath.c_str(), GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hCaptureDevice = CreateFileW(captureDevicePath, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hCaptureDevice == INVALID_HANDLE_VALUE) {
         LogError(L"  LoopbackTest: Failed to open Capture device.", GetLastError());
         CloseHandle(hRenderDevice);
@@ -212,7 +245,7 @@ void testAudioLoopback(int deviceIndex, uint16_t numChannelsToTest, const std::s
     formatExt.DataFormat.Specifier = KSDATAFORMAT_SPECIFIER_WAVEFORMATEX;
     formatExt.WaveFormatEx.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
     formatExt.WaveFormatEx.nChannels = numChannelsToTest;
-    formatExt.WaveFormatEx.nSamplesPerSec = 48000;
+    formatExt.WaveFormatEx.nSamplesPerSec = 48000; 
     formatExt.WaveFormatEx.wBitsPerSample = 16;
     formatExt.WaveFormatEx.nBlockAlign = (formatExt.WaveFormatEx.nChannels * formatExt.WaveFormatEx.wBitsPerSample) / 8;
     formatExt.WaveFormatEx.nAvgBytesPerSec = formatExt.WaveFormatEx.nSamplesPerSec * formatExt.WaveFormatEx.nBlockAlign;
@@ -269,6 +302,7 @@ void testAudioLoopback(int deviceIndex, uint16_t numChannelsToTest, const std::s
     UINT32 bufferDurationMs = 100; 
     DWORD chunkSizeSamples = (sampleRate * bufferDurationMs / 1000) * numChannelsToTest;
     DWORD chunkSizeBytes = chunkSizeSamples * sizeof(int16_t);
+    if (chunkSizeBytes == 0 && dataByteSize > 0) chunkSizeBytes = dataByteSize;
 
     char* pCurrentSinePos = reinterpret_cast<char*>(sineWave.data());
     char* pCurrentCapturePos = reinterpret_cast<char*>(capturedData.data());
@@ -276,7 +310,7 @@ void testAudioLoopback(int deviceIndex, uint16_t numChannelsToTest, const std::s
     DWORD remainingBytesToRead = dataByteSize;
 
     std::wcout << L"  LoopbackTest: Starting audio loopback (" << numChannelsToTest << " ch)..." << std::endl;
-    while (totalBytesRead < dataByteSize && totalBytesWritten < dataByteSize) {
+    while ((totalBytesRead < dataByteSize || totalBytesWritten < dataByteSize) && chunkSizeBytes > 0) {
         DWORD bytesToWriteThisChunk = min(chunkSizeBytes, remainingBytesToWrite);
         DWORD bytesWrittenCurrent = 0; 
         if (bytesToWriteThisChunk > 0) {
@@ -291,6 +325,7 @@ void testAudioLoopback(int deviceIndex, uint16_t numChannelsToTest, const std::s
 
         DWORD bytesToReadThisChunk = min(chunkSizeBytes, remainingBytesToRead);
         if (bytesToReadThisChunk > 0 && totalBytesWritten > totalBytesRead) { 
+            Sleep(bufferDurationMs / 2); 
             DWORD bytesReadCurrent = 0; 
             if (!ReadFile(hCaptureDevice, pCurrentCapturePos, bytesToReadThisChunk, &bytesReadCurrent, NULL)) {
                 LogError(L"  LoopbackTest: ReadFile failed.", GetLastError());
@@ -300,12 +335,13 @@ void testAudioLoopback(int deviceIndex, uint16_t numChannelsToTest, const std::s
             totalBytesRead += bytesReadCurrent;
             remainingBytesToRead -= bytesReadCurrent;
         }
+        if (bytesToWriteThisChunk == 0 && bytesToReadThisChunk == 0) break; 
     }
     std::wcout << L"  LoopbackTest: Loopback finished. Total Written: " << totalBytesWritten << ", Total Read: " << totalBytesRead << std::endl;
 
     if (totalBytesRead > 0) { 
         capturedData.resize(totalBytesRead / sizeof(int16_t)); 
-        std::string wavFilename = "captured_audio_instance_" + std::to_string(deviceIndex) + wavFileSuffix + ".wav";
+        std::string wavFilename = "captured_audio" + wavFileSuffix + ".wav";
         if (WavWriter::writeWavFile(wavFilename, capturedData, numChannelsToTest, sampleRate, bitsPerSample)) {
             std::wcout << L"  LoopbackTest: Captured audio saved to " << wavFilename.c_str() << std::endl;
         } else {
@@ -327,59 +363,67 @@ cleanup:
         DeviceIoControl(hCaptureDevice, IOCTL_KS_PROPERTY, &PinProperty, sizeof(KSP_PIN), &targetState, sizeof(KSSTATE), &bytesReturnedPin, NULL);
         CloseHandle(hCaptureDevice);
     }
-    std::wcout << L"--- Audio Loopback Test (" << numChannelsToTest << L" ch) for Instance " << deviceIndex << L" Finished ---" << std::endl;
+    std::wcout << L"--- Audio Loopback Test (" << numChannelsToTest << L" ch) Finished ---" << std::endl;
 }
 
-void testAudioLoopback16ch(int deviceIndex) {
-    testAudioLoopback(deviceIndex, 16, "_16ch");
-}
 
 int main() {
     std::wcout << L"Lama Loopback Driver Test Application" << std::endl;
     std::wcout << L"=====================================" << std::endl << std::endl;
 
-    bool anyDeviceOpened = false;
+    std::wstring renderDevicePath;
+    std::wstring captureDevicePath;
+    bool renderDeviceFound = false;
+    bool captureDeviceFound = false;
 
-    for (int i = 0; i < 1; ++i) { 
-        std::wcout << L"Testing Driver Instance: " << i << std::endl;
-        std::wstring renderPath = GetDevicePath(i, true);
-        std::wstring capturePath = GetDevicePath(i, false);
+    if (GetDevicePath(KSCATEGORY_AUDIO, L"Lama Loopback Render", renderDevicePath)) {
+        renderDeviceFound = true;
+    } else if (GetDevicePath(KSCATEGORY_AUDIO, L"SysvadLoopback_Dev", renderDevicePath)) { 
+        renderDeviceFound = true;
+    } else if (GetDevicePath(KSCATEGORY_AUDIO, L"LAMA", renderDevicePath)) { 
+         renderDeviceFound = true;
+    }
+    
+    if(renderDeviceFound) {
+        std::wcout << L"Found Render Device Path: " << renderDevicePath << std::endl;
+    } else {
+        std::wcerr << L"Failed to find LAMA Loopback Render device. Some tests will be skipped." << std::endl;
+    }
 
-        std::wcout << L"  Render Path: " << renderPath << std::endl;
-        std::wcout << L"  Capture Path: " << capturePath << std::endl;
+    if (GetDevicePath(KSCATEGORY_AUDIO, L"Lama Loopback Capture", captureDevicePath)) {
+        captureDeviceFound = true;
+    } else if (GetDevicePath(KSCATEGORY_AUDIO, L"SysvadLoopback_Dev", captureDevicePath)) { 
+         captureDeviceFound = true;
+    } else if (GetDevicePath(KSCATEGORY_AUDIO, L"LAMA", captureDevicePath)) { 
+         captureDeviceFound = true;
+    }
 
-        HANDLE hRender = CreateFileW(renderPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hRender == INVALID_HANDLE_VALUE) {
-            LogError(L"    Failed to open Render device.", GetLastError());
-        } else {
-            std::wcout << L"    Render device opened successfully." << std::endl;
-            CloseHandle(hRender);
-            anyDeviceOpened = true;
-        }
+    if(captureDeviceFound) {
+        std::wcout << L"Found Capture Device Path: " << captureDevicePath << std::endl;
+    } else {
+        std::wcerr << L"Failed to find LAMA Loopback Capture device. Some tests will be skipped." << std::endl;
+    }
+    
+    std::wcout << L"------------------------------------" << std::endl;
 
-        HANDLE hCapture = CreateFileW(capturePath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hCapture == INVALID_HANDLE_VALUE) {
-            LogError(L"    Failed to open Capture device.", GetLastError());
-        } else {
-            std::wcout << L"    Capture device opened successfully." << std::endl;
-            CloseHandle(hCapture);
-            anyDeviceOpened = true;
-        }
+    if (renderDeviceFound) {
+        testSampleRateControl(renderDevicePath.c_str());
+        std::wcout << L"------------------------------------" << std::endl;
+    } else {
+        std::wcout << L"Skipping Sample Rate Control test as Render device was not found." << std::endl;
         std::wcout << L"------------------------------------" << std::endl;
     }
 
-    if (!anyDeviceOpened && 0 ) { 
-        std::wcerr << L"Initial check: Instance 0 could not be opened. Please ensure the driver is installed and running." << std::endl;
+    if (renderDeviceFound && captureDeviceFound) {
+        testAudioLoopback(renderDevicePath.c_str(), captureDevicePath.c_str(), 2, "_2ch_dyn"); 
+        std::wcout << L"------------------------------------" << std::endl;
+        testAudioLoopback(renderDevicePath.c_str(), captureDevicePath.c_str(), 16, "_16ch_dyn"); 
+        std::wcout << L"------------------------------------" << std::endl;
+    } else {
+        std::wcout << L"Skipping Audio Loopback tests as Render or Capture device was not found." << std::endl;
+        std::wcout << L"------------------------------------" << std::endl;
     }
-
-    testSampleRateControl(0);
-    std::wcout << L"------------------------------------" << std::endl;
-
-    testAudioLoopback(0, 2, "_2ch"); 
-    std::wcout << L"------------------------------------" << std::endl;
-
-    testAudioLoopback16ch(0); 
-
+    
     std::wcout << L"Driver Test Application Finished." << std::endl;
     return 0;
 }

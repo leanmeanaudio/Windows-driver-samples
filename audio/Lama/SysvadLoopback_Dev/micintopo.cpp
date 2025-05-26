@@ -2,10 +2,8 @@
 #include <wdm.h>
 #include <portcls.h>
 #include "lamaloopbackcommon.h" // For globals, property GUIDs, common formats, etc.
-#include "lamaloopbackcapture.h"
-#include "lamaloopbackstream.h" 
-#include "baseaddress.h" 
-#include "resource.h" 
+#include "micintopo.h"
+#include "hdmitopo.h" 
 
 // If LAMA_POOL_TAG is not defined elsewhere (it should be in common.h or resource.h)
 #ifndef LAMA_POOL_TAG
