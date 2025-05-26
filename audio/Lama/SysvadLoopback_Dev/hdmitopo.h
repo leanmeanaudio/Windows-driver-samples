@@ -119,7 +119,8 @@ public:
     NTSTATUS Init(
         _In_ PPORTWAVERTSTREAM PortStream,
         _In_ PKSDATAFORMAT DataFormat,
-        _In_ BOOLEAN Capture
+        _In_ BOOLEAN Capture,
+        _In_ ULONG InstanceIndex // New parameter
     );
 
     // Internal helper methods for data transfer with shared buffer
@@ -133,6 +134,7 @@ private:
     PKSDATAFORMAT_WAVEFORMATEXTENSIBLE m_pDataFormat; 
     KSSTATE                 m_KsState;          
     BOOLEAN                 m_bCapture;         
+    ULONG                   m_instanceIndex;        // Index for the per-instance shared buffer
 
     PMDL                    m_pAudioBufferMdl;      
     PVOID                   m_pAudioBuffer;         // KVA of m_pAudioBufferMdl
@@ -145,7 +147,6 @@ private:
 
     KTIMER                  m_NotificationTimer;    
     HANDLE                  m_NotificationEvent;    // Event from PortCls for WaveRT notifications
-                                                    // (e.g. from IPortWaveRTStream::RegisterNotificationEvent)
     KDPC                    m_NotificationDpc;      // DPC for handling notifications (example)
     ULONG                   m_ulDmaMovementRate;    // How often DMA moves, for GetPosition simulation
     ULONGLONG               m_ullPlayPosition;      // Stream's own position counter
@@ -167,6 +168,18 @@ public:
         _In_opt_ PVOID DeferredContext,
         _In_opt_ PVOID SystemArgument1,
         _In_opt_ PVOID SystemArgument2
+    );
+
+    // New methods for direct IRP data handling (WriteFile/ReadFile)
+    NTSTATUS HandleWriteIRPData(
+        _In_reads_bytes_(ulByteCount) PVOID pData,
+        _In_ ULONG ulByteCount
+    );
+
+    NTSTATUS HandleReadIRPData(
+        _Out_writes_bytes_to_(ulReqSize, *pulBytesCopied) PVOID pData,
+        _In_ ULONG ulReqSize,
+        _Out_ PULONG pulBytesCopied
     );
 };
 

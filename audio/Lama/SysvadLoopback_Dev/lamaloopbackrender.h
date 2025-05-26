@@ -1,294 +1,223 @@
 #pragma once
 
-#include "lamaloopbackcommon.h" // For LamaLoopbackFilterAutomationTable extern declaration
+#include "lamaloopbackcommon.h" // For LamaLoopbackFilterAutomationTable extern declaration, PinDataRangesPcm, GUIDs etc.
 #include "minipairs.h" 
 #include "MiniportTopology.h" 
 #include "MiniportWaveRT.h"   
 
-// Forward declarations
+// Forward declarations for Render
 class CMiniportTopologyLamaLoopbackRender;
 typedef CMiniportTopologyLamaLoopbackRender *PCMiniportTopologyLamaLoopbackRender;
 
 class CMiniportWaveRTLamaLoopbackRender;
 typedef CMiniportWaveRTLamaLoopbackRender *PCMiniportWaveRTLamaLoopbackRender;
 
+NTSTATUS LamaRenderPinWrite(_In_ PKSPIN Pin, _In_ PIRP Irp);
+
+// Forward declarations for Capture
+class CMiniportTopologyLamaLoopbackCapture;
+typedef CMiniportTopologyLamaLoopbackCapture *PCMiniportTopologyLamaLoopbackCapture;
+
+class CMiniportWaveRTLamaLoopbackCapture;
+typedef CMiniportWaveRTLamaLoopbackCapture *PCMiniportWaveRTLamaLoopbackCapture;
+
+NTSTATUS LamaCapturePinRead(_In_ PKSPIN Pin, _In_ PIRP Irp);
+
+
 //=============================================================================
 // Render Topology Descriptors
 //=============================================================================
-
-//
-// Render Topology Pins
-//
-static
-KSPIN_DESCRIPTOR_EX LamaLoopbackRenderTopoPins[] =
+static KSPIN_DESCRIPTOR_EX LamaLoopbackRenderTopoPins[] =
 {
-    // KSPIN_TOPO_BRIDGE_IN (Connects to Wave's Host Pin)
+    // KSPIN_TOPO_BRIDGE_IN (ID 0) (Connects to Wave's Host Pin)
     {
-        NULL,                               // Dispatch
-        NULL,                               // AutomationTable (Pins usually don't have their own top-level automation table)
-        {                                   // PinDesc
-            0,                                  // InterfacesCount
-            NULL,                               // Interfaces
-            0,                                  // MediumsCount
-            NULL,                               // Mediums
-            SIZEOF_ARRAY(PinDataRangesPcm),     // DataRangesCount
-            PinDataRangesPcm,                   // DataRanges
-            KSPIN_DATAFLOW_IN,                  // DataFlow
-            KSPIN_COMMUNICATION_NONE,           // Communication
-            &KSCATEGORY_AUDIO,                  // Category
-            NULL,                               // Name
-            0                                   // ConstrainedDataRangesCount
+        NULL,                               
+        NULL,                               
+        {                                   
+            0, NULL, 0, NULL, SIZEOF_ARRAY(PinDataRangesPcm), PinDataRangesPcm,
+            KSPIN_DATAFLOW_IN, KSPIN_COMMUNICATION_NONE,
+            &LAMA_LOOPBACK_BRIDGE_PIN_IN, // Category: Matches Render Wave's KSPIN_WAVE_BRIDGE_OUT category
+            NULL, 0                                   
         },
-        KSPIN_FLAG_DISPATCH_LEVEL,          // Flags
-        KSPIN_TOPO_BRIDGE_IN                // Pin ID
+        KSPIN_FLAG_DISPATCH_LEVEL,         
+        KSPIN_TOPO_BRIDGE_IN                
     },
-    // KSPIN_TOPO_LOOPBACK_OUT (Connects to Capture Topology's Loopback In)
+    // KSPIN_TOPO_LOOPBACK_OUT (ID 1) (Connects to Capture Topology's Loopback In)
     {
-        NULL,                               // Dispatch
-        NULL,                               // AutomationTable
-        {                                   // PinDesc
-            0,                                  // InterfacesCount
-            NULL,                               // Interfaces
-            0,                                  // MediumsCount
-            NULL,                               // Mediums
-            SIZEOF_ARRAY(PinDataRangesPcm),     // DataRangesCount
-            PinDataRangesPcm,                   // DataRanges
-            KSPIN_DATAFLOW_OUT,                 // DataFlow
-            KSPIN_COMMUNICATION_NONE,           // Communication
-            &KSCATEGORY_AUDIO,                  // Category (or a custom one like LAMA_LOOPBACK_BRIDGE_PIN_OUT)
-            NULL,                               // Name
-            0                                   // ConstrainedDataRangesCount
+        NULL,                               
+        NULL,                               
+        {                                   
+            0, NULL, 0, NULL, SIZEOF_ARRAY(PinDataRangesPcm), PinDataRangesPcm,                   
+            KSPIN_DATAFLOW_OUT, KSPIN_COMMUNICATION_NONE,           
+            &KSCATEGORY_AUDIO, // Category for inter-topology loopback connection         
+            NULL, 0                                   
         },
-        KSPIN_FLAG_DISPATCH_LEVEL,          // Flags
-        KSPIN_TOPO_LOOPBACK_OUT             // Pin ID
+        KSPIN_FLAG_DISPATCH_LEVEL,          
+        KSPIN_TOPO_LOOPBACK_OUT             
     }
 };
 
-//
-// Render Topology Nodes (None for passthrough)
-//
-static
-KSNODE_DESCRIPTOR LamaLoopbackRenderTopoNodes[] =
+static KSNODE_DESCRIPTOR LamaLoopbackRenderTopoNodes[] = { /* None */ };
+static KSTOPOLOGY_CONNECTION LamaLoopbackRenderTopoConnections[] =
 {
-    // No nodes for simple passthrough, but could include AEC, Mute, Volume here if desired
-    // For KSPROPSETID_LamaLoopback, it's a filter-level property, not node.
+    { KSPIN_TOPO_BRIDGE_IN, KSNODE_NONE, KSPIN_TOPO_LOOPBACK_OUT, KSNODE_NONE }
 };
 
-//
-// Render Topology Connections
-//
-static
-KSTOPOLOGY_CONNECTION LamaLoopbackRenderTopoConnections[] =
+static KSFILTER_DESCRIPTOR LamaLoopbackRenderTopologyFilterDescriptor =
 {
-    { KSPIN_TOPO_BRIDGE_IN,     KSNODE_NONE,            KSPIN_TOPO_LOOPBACK_OUT,    KSNODE_NONE }
-};
-
-//
-// Render Topology Filter Descriptor
-//
-static
-KSFILTER_DESCRIPTOR LamaLoopbackRenderTopologyFilterDescriptor =
-{
-    NULL,                                           // Dispatch (PortCls handles this for topology)
-    &LamaLoopbackFilterAutomationTable,             // AutomationTable <--- MODIFIED
-    KSFILTER_VERSION_DEVICE_SPECIFIC,               // Version
-    0,                                              // Flags
-    &KSCATEGORY_LAMA_LOOPBACK,                      // Categories (use the custom one)
-    SIZEOF_ARRAY(LamaLoopbackRenderTopoPins),       // PinDescriptorsCount
-    LamaLoopbackRenderTopoPins,                     // PinDescriptors
-    SIZEOF_ARRAY(LamaLoopbackRenderTopoNodes),      // NodeDescriptorsCount
-    LamaLoopbackRenderTopoNodes,                    // NodeDescriptors
-    SIZEOF_ARRAY(LamaLoopbackRenderTopoConnections),// ConnectionDescriptorsCount
-    LamaLoopbackRenderTopoConnections,              // ConnectionDescriptors
-    NULL                                            // ComponentId
+    NULL, &LamaLoopbackFilterAutomationTable, KSFILTER_VERSION_DEVICE_SPECIFIC, 0,
+    &KSCATEGORY_LAMA_LOOPBACK, SIZEOF_ARRAY(LamaLoopbackRenderTopoPins), LamaLoopbackRenderTopoPins,
+    SIZEOF_ARRAY(LamaLoopbackRenderTopoNodes), LamaLoopbackRenderTopoNodes,
+    SIZEOF_ARRAY(LamaLoopbackRenderTopoConnections), LamaLoopbackRenderTopoConnections, NULL
 };
 
 //=============================================================================
 // Render Wave Descriptors
 //=============================================================================
+static const KSPIN_DISPATCH LamaRenderPinDispatch =
+{ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, LamaRenderPinWrite, NULL, NULL, NULL, NULL, NULL };
 
-//
-// Render Wave Pins
-//
-static
-KSPIN_DESCRIPTOR_EX LamaLoopbackRenderWavePins[] =
+static KSPIN_DESCRIPTOR_EX LamaLoopbackRenderWavePins[] =
 {
-    // KSPIN_WAVE_HOST_IN
+    // KSPIN_WAVE_HOST_IN (ID 0)
     {
-        NULL,                               // Dispatch
-        NULL,                               // AutomationTable (Pins typically don't have one here)
-        {                                   // PinDesc
-            0,                                  // InterfacesCount
-            NULL,                               // Interfaces
-            0,                                  // MediumsCount
-            NULL,                               // Mediums
-            SIZEOF_ARRAY(PinDataRangesPcm),     // DataRangesCount
-            PinDataRangesPcm,                   // DataRanges
-            KSPIN_DATAFLOW_IN,                  // DataFlow
-            KSPIN_COMMUNICATION_SINK,           // Communication
-            &KSCATEGORY_AUDIO,                  // Category
-            &PINNAME_LamaLoopbackWaveIn,        // Name GUID
-            0                                   // ConstrainedDataRangesCount
-        },
-        KSPIN_FLAG_DISPATCH_LEVEL | KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING, // Flags
-        KSPIN_WAVE_HOST_IN                  // Pin ID
+        &LamaRenderPinDispatch, NULL,                               
+        { 0, NULL, 0, NULL, SIZEOF_ARRAY(PinDataRangesPcm), PinDataRangesPcm, KSPIN_DATAFLOW_IN, KSPIN_COMMUNICATION_SINK, &KSCATEGORY_AUDIO, &PINNAME_LamaLoopbackWaveIn, 0 },
+        KSPIN_FLAG_DISPATCH_LEVEL | KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING, KSPIN_WAVE_HOST_IN
     },
-    // KSPIN_WAVE_BRIDGE_OUT
+    // KSPIN_WAVE_BRIDGE_OUT (ID 1)
     {
-        NULL,                               // Dispatch
-        NULL,                               // AutomationTable
-        {                                   // PinDesc
-            0,                                  // InterfacesCount
-            NULL,                               // Interfaces
-            0,                                  // MediumsCount
-            NULL,                               // Mediums
-            SIZEOF_ARRAY(PinDataRangesPcm),     // DataRangesCount
-            PinDataRangesPcm,                   // DataRanges
-            KSPIN_DATAFLOW_OUT,                 // DataFlow
-            KSPIN_COMMUNICATION_NONE,           // Communication
-            &LAMA_LOOPBACK_BRIDGE_PIN_IN,       // Category (Specific bridge pin GUID)
-            NULL,                               // Name
-            0                                   // ConstrainedDataRangesCount
-        },
-        KSPIN_FLAG_DISPATCH_LEVEL,          // Flags
-        KSPIN_WAVE_BRIDGE_OUT               // Pin ID
+        NULL, NULL,                               
+        { 0, NULL, 0, NULL, SIZEOF_ARRAY(PinDataRangesPcm), PinDataRangesPcm, KSPIN_DATAFLOW_OUT, KSPIN_COMMUNICATION_NONE, &LAMA_LOOPBACK_BRIDGE_PIN_IN, NULL, 0 },
+        KSPIN_FLAG_DISPATCH_LEVEL, KSPIN_WAVE_BRIDGE_OUT
     }
 };
 
-//
-// Render Wave Nodes (None for passthrough, but could have a SRC node if sample rate conversion was supported independently of global rate)
-//
-static
-KSNODE_DESCRIPTOR LamaLoopbackRenderWaveNodes[] =
+static KSNODE_DESCRIPTOR LamaLoopbackRenderWaveNodes[] = { /* None */ };
+static KSTOPOLOGY_CONNECTION LamaLoopbackRenderWaveConnections[] =
 {
-    // No nodes for simple passthrough
+    { KSPIN_WAVE_HOST_IN, KSNODE_NONE, KSPIN_WAVE_BRIDGE_OUT, KSNODE_NONE }
 };
 
-//
-// Render Wave Connections
-//
-static
-KSTOPOLOGY_CONNECTION LamaLoopbackRenderWaveConnections[] =
+static KSFILTER_DESCRIPTOR LamaLoopbackRenderWaveFilterDescriptor =
 {
-    { KSPIN_WAVE_HOST_IN,       KSNODE_NONE,    KSPIN_WAVE_BRIDGE_OUT,  KSNODE_NONE }
+    NULL, &LamaLoopbackFilterAutomationTable, KSFILTER_VERSION_DEVICE_SPECIFIC, 0,
+    &KSCATEGORY_AUDIO, SIZEOF_ARRAY(LamaLoopbackRenderWavePins), LamaLoopbackRenderWavePins,
+    SIZEOF_ARRAY(LamaLoopbackRenderWaveNodes), LamaLoopbackRenderWaveNodes,
+    SIZEOF_ARRAY(LamaLoopbackRenderWaveConnections), LamaLoopbackRenderWaveConnections, NULL
 };
 
-//
-// Render Wave Filter Descriptor
-//
-static
-KSFILTER_DESCRIPTOR LamaLoopbackRenderWaveFilterDescriptor =
-{
-    NULL,                                           // Dispatch (PortCls handles for wave too)
-    &LamaLoopbackFilterAutomationTable,             // AutomationTable <--- MODIFIED
-    KSFILTER_VERSION_DEVICE_SPECIFIC,               // Version
-    0,                                              // Flags
-    &KSCATEGORY_AUDIO,                              // Categories
-    SIZEOF_ARRAY(LamaLoopbackRenderWavePins),       // PinDescriptorsCount
-    LamaLoopbackRenderWavePins,                     // PinDescriptors
-    SIZEOF_ARRAY(LamaLoopbackRenderWaveNodes),      // NodeDescriptorsCount
-    LamaLoopbackRenderWaveNodes,                    // NodeDescriptors
-    SIZEOF_ARRAY(LamaLoopbackRenderWaveConnections),// ConnectionDescriptorsCount
-    LamaLoopbackRenderWaveConnections,              // ConnectionDescriptors
-    NULL                                            // ComponentId
+static PIN_DEVICE_FORMATS_AND_MODES LamaLoopbackRenderPinDeviceFormatsAndModes[] =
+{ { KSPIN_WAVE_HOST_IN, (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)&Pcm48000_Stereo_16bit, NULL, NULL, MODE_RAW | MODE_DEFAULT, FALSE, NULL } };
+
+//=============================================================================
+// Render Miniport Class Definitions
+//=============================================================================
+class CMiniportTopologyLamaLoopbackRender : public CMiniportTopology, public CUnknown 
+{ 
+public: DECLARE_STD_UNKNOWN(); DEFINE_STD_CONSTRUCTOR(CMiniportTopologyLamaLoopbackRender); ~CMiniportTopologyLamaLoopbackRender();
+    NTSTATUS Init(_In_ PUNKNOWN UnknownAdapter, _In_ PRESOURCELIST ResourceList, _In_ PPORTTOPOLOGY PortTopology);
+    NTSTATUS DataRangeIntersection(_In_ ULONG PinId, _In_ PKSDATARANGE DataRange, _In_ PKSDATARANGE MatchingDataRange, _In_ ULONG OutputBufferLength, _Out_writes_bytes_to_opt_(OutputBufferLength, *ResultantFormatLength) PVOID ResultantFormat, _Out_ PULONG ResultantFormatLength);
+private: PPORTTOPOLOGY m_Port; PUNKNOWN m_UnknownAdapter;
 };
 
-//
-// Render Pin Device Formats and Modes
-// (This structure is typically used by IPortClsStreamResourceManager)
-//
-static
-PIN_DEVICE_FORMATS_AND_MODES LamaLoopbackRenderPinDeviceFormatsAndModes[] =
+class CMiniportWaveRTLamaLoopbackRender : public CMiniportWaveRT, public CUnknown 
+{ 
+public: DECLARE_STD_UNKNOWN(); DEFINE_STD_CONSTRUCTOR(CMiniportWaveRTLamaLoopbackRender); ~CMiniportWaveRTLamaLoopbackRender();
+    NTSTATUS Init(_In_ PUNKNOWN UnknownAdapter, _In_ PRESOURCELIST ResourceList, _In_ PPORTWAVERT Port);
+    NTSTATUS NewStream(_Out_ PMINIPORTWAVERTSTREAM * Stream, _In_ PPORTWAVERTSTREAM PortStream, _In_ ULONG Pin, _In_ BOOLEAN Capture, _In_ PKSDATAFORMAT DataFormat);
+private: 
+    PPORTWAVERT m_Port; 
+    PUNKNOWN m_UnknownAdapter;
+    ULONG m_MiniportInstanceIndex; // Added instance index
+};
+
+//=============================================================================
+// Capture Topology Descriptors
+//=============================================================================
+static KSPIN_DESCRIPTOR_EX LamaLoopbackCaptureTopoPins[] =
 {
+    // KSPIN_TOPO_LOOPBACK_IN (ID 0)
     {
-        SystemRenderPin, // Pin ID (KSPIN_WAVE_HOST_IN, assuming SystemRenderPin is defined as 0)
-        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)&Pcm48000_Stereo_16bit, // Default format, DataRangeIntersection will handle current global settings
-        NULL, 
-        NULL, 
-        MODE_RAW | MODE_DEFAULT, 
-        FALSE, 
-        NULL   
+        NULL, NULL,
+        { 0, NULL, 0, NULL, SIZEOF_ARRAY(PinDataRangesPcm), PinDataRangesPcm, KSPIN_DATAFLOW_IN, KSPIN_COMMUNICATION_NONE, &KSCATEGORY_AUDIO, NULL, 0 },
+        KSPIN_FLAG_DISPATCH_LEVEL, KSPIN_TOPO_LOOPBACK_IN
+    },
+    // KSPIN_TOPO_BRIDGE_OUT (ID 1)
+    {
+        NULL, NULL,
+        { 0, NULL, 0, NULL, SIZEOF_ARRAY(PinDataRangesPcm), PinDataRangesPcm, KSPIN_DATAFLOW_OUT, KSPIN_COMMUNICATION_NONE, &KSCATEGORY_AUDIO, NULL, 0 },
+        KSPIN_FLAG_DISPATCH_LEVEL, KSPIN_TOPO_BRIDGE_OUT
     }
 };
 
-//
-// Render Miniport class (Topology)
-//
-class CMiniportTopologyLamaLoopbackRender : 
-    public CMiniportTopology, 
-    public CUnknown
+static KSNODE_DESCRIPTOR LamaLoopbackCaptureTopoNodes[] = { /* None */ };
+static KSTOPOLOGY_CONNECTION LamaLoopbackCaptureTopoConnections[] =
+{ { KSPIN_TOPO_LOOPBACK_IN, KSNODE_NONE, KSPIN_TOPO_BRIDGE_OUT, KSNODE_NONE } };
+
+static KSFILTER_DESCRIPTOR LamaLoopbackCaptureTopologyFilterDescriptor =
 {
-public:
-    DECLARE_STD_UNKNOWN();
-    DEFINE_STD_CONSTRUCTOR(CMiniportTopologyLamaLoopbackRender);
-    ~CMiniportTopologyLamaLoopbackRender();
-
-    NTSTATUS                Init
-    (
-        _In_  PUNKNOWN        UnknownAdapter,
-        _In_  PRESOURCELIST   ResourceList,
-        _In_  PPORTTOPOLOGY   PortTopology
-    );
-
-    NTSTATUS                DataRangeIntersection
-    (
-        _In_        ULONG           PinId,
-        _In_        PKSDATARANGE    DataRange,
-        _In_        PKSDATARANGE    MatchingDataRange,
-        _In_        ULONG           OutputBufferLength,
-        _Out_writes_bytes_to_opt_(OutputBufferLength, *ResultantFormatLength)
-                    PVOID           ResultantFormat,
-        _Out_       PULONG          ResultantFormatLength
-    );
-
-private:
-    PPORTTOPOLOGY           m_Port;
-    PUNKNOWN                m_UnknownAdapter;
+    NULL, &LamaLoopbackFilterAutomationTable, KSFILTER_VERSION_DEVICE_SPECIFIC, 0,
+    &KSCATEGORY_LAMA_LOOPBACK, SIZEOF_ARRAY(LamaLoopbackCaptureTopoPins), LamaLoopbackCaptureTopoPins,
+    SIZEOF_ARRAY(LamaLoopbackCaptureTopoNodes), LamaLoopbackCaptureTopoNodes,
+    SIZEOF_ARRAY(LamaLoopbackCaptureTopoConnections), LamaLoopbackCaptureTopoConnections, NULL
 };
 
-//
-// Render Miniport class (WaveRT)
-//
-class CMiniportWaveRTLamaLoopbackRender :
-    public CMiniportWaveRT, 
-    public CUnknown
+//=============================================================================
+// Capture Wave Descriptors
+//=============================================================================
+static const KSPIN_DISPATCH LamaCapturePinDispatch =
+{ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, LamaCapturePinRead, NULL, NULL, NULL, NULL };
+
+static KSPIN_DESCRIPTOR_EX LamaLoopbackCaptureWavePins[] =
 {
-public:
-    DECLARE_STD_UNKNOWN();
-    DEFINE_STD_CONSTRUCTOR(CMiniportWaveRTLamaLoopbackRender);
-    ~CMiniportWaveRTLamaLoopbackRender();
-
-    NTSTATUS                Init
-    (
-        _In_  PUNKNOWN        UnknownAdapter,
-        _In_  PRESOURCELIST   ResourceList,
-        _In_  PPORTWAVERT     Port
-    );
-
-    NTSTATUS                NewStream
-    (
-        _Out_ PMINIPORTWAVERTSTREAM * Stream,
-        _In_  PPORTWAVERTSTREAM       PortStream,
-        _In_  ULONG                   Pin,
-        _In_  BOOLEAN                 Capture,
-        _In_  PKSDATAFORMAT           DataFormat
-    );
-
-private:
-    PPORTWAVERT             m_Port;
-    PUNKNOWN                m_UnknownAdapter;
+    // KSPIN_WAVE_CAPTURE_HOST_OUT (ID 0)
+    {
+        &LamaCapturePinDispatch, NULL,
+        { 0, NULL, 0, NULL, SIZEOF_ARRAY(PinDataRangesPcm), PinDataRangesPcm, KSPIN_DATAFLOW_OUT, KSPIN_COMMUNICATION_SOURCE, &KSCATEGORY_AUDIO, &PINNAME_LamaLoopbackWaveOut, 0 },
+        KSPIN_FLAG_DISPATCH_LEVEL | KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING, KSPIN_WAVE_CAPTURE_HOST_OUT
+    },
+    // KSPIN_WAVE_BRIDGE_IN (ID 1)
+    {
+        NULL, NULL,
+        { 0, NULL, 0, NULL, SIZEOF_ARRAY(PinDataRangesPcm), PinDataRangesPcm, KSPIN_DATAFLOW_IN, KSPIN_COMMUNICATION_NONE, &KSCATEGORY_AUDIO, NULL, 0 },
+        KSPIN_FLAG_DISPATCH_LEVEL, KSPIN_WAVE_BRIDGE_IN
+    }
 };
 
-// Note: The original LamaLoopbackRenderWaveFilterAutomation tables defined here
-// were specific to CMiniportWaveRT::PropertyHandler_WaveFilter and CMiniportWaveRT::PropertyHandlerLamaSampleRate.
-// The new KSPROPSETID_LamaLoopback is filter-wide and defined via LamaLoopbackFilterAutomationTable.
-// If additional wave-specific properties were needed, they would use a separate automation table.
-// For this task, LamaLoopbackFilterAutomationTable is applied to the filter descriptor.Okay, I've updated `lamaloopbackcommon.h` and `lamaloopbackrender.h`.
+static KSNODE_DESCRIPTOR LamaLoopbackCaptureWaveNodes[] = { /* None */ };
+static KSTOPOLOGY_CONNECTION LamaLoopbackCaptureWaveConnections[] =
+{ { KSPIN_WAVE_BRIDGE_IN, KSNODE_NONE, KSPIN_WAVE_CAPTURE_HOST_OUT, KSNODE_NONE } };
 
-Now, I will proceed to **Step 5.3: Update `PCFILTER_DESCRIPTOR` in `lamaloopbackcapture.h`**.
+static KSFILTER_DESCRIPTOR LamaLoopbackCaptureWaveFilterDescriptor =
+{
+    NULL, &LamaLoopbackFilterAutomationTable, KSFILTER_VERSION_DEVICE_SPECIFIC, 0,
+    &KSCATEGORY_AUDIO, SIZEOF_ARRAY(LamaLoopbackCaptureWavePins), LamaLoopbackCaptureWavePins,
+    SIZEOF_ARRAY(LamaLoopbackCaptureWaveNodes), LamaLoopbackCaptureWaveNodes,
+    SIZEOF_ARRAY(LamaLoopbackCaptureWaveConnections), LamaLoopbackCaptureWaveConnections, NULL
+};
 
-I need to:
-1.  Read `lamaloopbackcapture.h`.
-2.  Locate the `PCFILTER_DESCRIPTOR` definitions for the capture topology and wave filters.
-3.  Set their `.AutomationTable = &LamaLoopbackFilterAutomationTable;` (which is declared `extern` in `lamaloopbackcommon.h` and defined in `lamaloopbackrender.cpp`).
-4.  Overwrite the file.
+static PIN_DEVICE_FORMATS_AND_MODES LamaLoopbackCapturePinDeviceFormatsAndModes[] =
+{ { KSPIN_WAVE_CAPTURE_HOST_OUT, (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)&Pcm48000_Stereo_16bit, NULL, NULL, MODE_RAW | MODE_DEFAULT, FALSE, NULL } };
+
+//=============================================================================
+// Capture Miniport Class Definitions
+//=============================================================================
+class CMiniportTopologyLamaLoopbackCapture : public CMiniportTopology, public CUnknown
+{
+public: DECLARE_STD_UNKNOWN(); DEFINE_STD_CONSTRUCTOR(CMiniportTopologyLamaLoopbackCapture); ~CMiniportTopologyLamaLoopbackCapture();
+    NTSTATUS Init(_In_ PUNKNOWN UnknownAdapter, _In_ PRESOURCELIST ResourceList, _In_ PPORTTOPOLOGY PortTopology);
+    NTSTATUS DataRangeIntersection(_In_ ULONG PinId, _In_ PKSDATARANGE DataRange, _In_ PKSDATARANGE MatchingDataRange, _In_ ULONG OutputBufferLength, _Out_writes_bytes_to_opt_(OutputBufferLength, *ResultantFormatLength) PVOID ResultantFormat, _Out_ PULONG ResultantFormatLength);
+private: PPORTTOPOLOGY m_Port; PUNKNOWN m_UnknownAdapter;
+};
+
+class CMiniportWaveRTLamaLoopbackCapture : public CMiniportWaveRT, public CUnknown
+{
+public: DECLARE_STD_UNKNOWN(); DEFINE_STD_CONSTRUCTOR(CMiniportWaveRTLamaLoopbackCapture); ~CMiniportWaveRTLamaLoopbackCapture();
+    NTSTATUS Init(_In_ PUNKNOWN UnknownAdapter, _In_ PRESOURCELIST ResourceList, _In_ PPORTWAVERT Port);
+    NTSTATUS NewStream(_Out_ PMINIPORTWAVERTSTREAM* Stream, _In_ PPORTWAVERTSTREAM PortStream, _In_ ULONG Pin, _In_ BOOLEAN Capture, _In_ PKSDATAFORMAT DataFormat);
+private: 
+    PPORTWAVERT m_Port; 
+    PUNKNOWN m_UnknownAdapter;
+    ULONG m_MiniportInstanceIndex; // Added instance index
+};
