@@ -32,6 +32,9 @@ DEFINE_GUID(MIC_CUSTOM_NAME, 0xd5649dc4, 0x2fa2, 0x418b, 0xb2, 0x78, 0x39, 0x7, 
 // Defining the component ID for the render circuit. This ID uniquely identifies the circuit instance (vendor specific):
 DEFINE_GUID(CODEC_RENDER_COMPONENT_GUID, 0xd03deb75, 0xe5b2, 0x45f7, 0x91, 0xfa, 0xf7, 0xae, 0x42, 0xdd, 0xf, 0xe0);
 
+// Defining the device interface GUID for LAMAConnect:
+DEFINE_GUID(GUID_DEVINTERFACE_LAMACONNECT, 0x87A6A867, 0x8C24, 0x427E, 0x88, 0x9C, 0x3E, 0x2B, 0xAF, 0x0D, 0x8C, 0x77);
+
 // This is always the definition for the system container guid:
 DEFINE_GUID(SYSTEM_CONTAINER_GUID, 0x00000000, 0x0000, 0x0000, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
 
@@ -52,3 +55,5 @@ DECLARE_CONST_UNICODE_STRING(captureCircuitName, L"Microphone0");
 
 // This string must match the string defined in AudioCodec.inf for the speaker name:
 DECLARE_CONST_UNICODE_STRING(renderCircuitName, L"Speaker0");
+
+[end of audio/Lama/ACX/DriverV2/AudioCodec/Driver/DriverSettings.h]

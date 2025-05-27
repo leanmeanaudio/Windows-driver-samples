@@ -36,6 +36,14 @@ extern "C" {
 #include <wdf.h>
 #include <acx.h>
 
+// Forward declare LAMA_CONNECT_SHARED_BUFFER if its definition is in LAMAConnectShared.h
+// and LAMAConnectShared.h is not/cannot be included here directly.
+// However, it's better if LAMAConnectShared.h is included before this file
+// or this struct definition includes LAMAConnectShared.h if it's self-contained.
+// For now, assuming LAMAConnectShared.h will be included by files that use this header.
+typedef struct _LAMA_CONNECT_SHARED_BUFFER LAMA_CONNECT_SHARED_BUFFER, *PLAMA_CONNECT_SHARED_BUFFER;
+
+
 #define PAGED_CODE_SEG __declspec(code_seg("PAGE"))
 #define INIT_CODE_SEG __declspec(code_seg("INIT"))
 
@@ -52,6 +60,17 @@ typedef struct _CODEC_DEVICE_CONTEXT {
     ACXCIRCUIT      Render;
     ACXCIRCUIT      Capture;
     WDF_TRI_STATE   ExcludeD3Cold;
+
+    // New fields for LAMAConnect
+    PLAMA_CONNECT_SHARED_BUFFER SharedBuffer;    // Pointer to the mapped shared buffer
+    HANDLE                  SharedMemoryHandle; // Handle to the shared memory section
+    PVOID                   SharedMemoryBase;   // Base address of the mapped shared memory
+    HANDLE                  CompletionEventHandle; // Renamed to avoid conflict
+    BOOLEAN                 LamaClientRegistered; // Flag if a LAMA client is active
+    UINT32                  LamaSampleRate;
+    UINT32                  LamaBufferSizeFrames; // To be clear it's in frames
+    UINT32                  LamaPluginChannelCount; // Actual channels plugin wants to use
+    WDFQUEUE                LamaIoQueue;        // Queue for LAMA IOCTLs
 } CODEC_DEVICE_CONTEXT, * PCODEC_DEVICE_CONTEXT;
 
 //
@@ -340,3 +359,5 @@ CodecMc_AddComposites(_In_ WDFDEVICE Device, _In_ CompositeType compositeType);
 
 NTSTATUS
 CodecMc_RemoveComposites(_In_ WDFDEVICE Device);
+
+[end of audio/Lama/ACX/DriverV2/Shared/Public.h]
