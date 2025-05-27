@@ -55,5 +55,3 @@ DECLARE_CONST_UNICODE_STRING(captureCircuitName, L"Microphone0");
 
 // This string must match the string defined in AudioCodec.inf for the speaker name:
 DECLARE_CONST_UNICODE_STRING(renderCircuitName, L"Speaker0");
-
-[end of audio/Lama/ACX/DriverV2/AudioCodec/Driver/DriverSettings.h]

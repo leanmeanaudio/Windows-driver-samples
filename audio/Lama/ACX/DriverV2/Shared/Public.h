@@ -40,7 +40,7 @@ extern "C" {
 // This is necessary because CODEC_DEVICE_CONTEXT uses PLAMA_CONNECT_SHARED_BUFFER.
 // Ensure LAMAConnectShared.h is self-contained and does not create circular dependencies.
 // Typically, LAMAConnectShared.h would only contain type definitions and constants.
-#include "LAMAConnectShared.h" 
+#include "..\AudioCodec\Driver\LAMAConnectShared.h" 
 
 
 #define PAGED_CODE_SEG __declspec(code_seg("PAGE"))
@@ -358,5 +358,3 @@ CodecMc_AddComposites(_In_ WDFDEVICE Device, _In_ CompositeType compositeType);
 
 NTSTATUS
 CodecMc_RemoveComposites(_In_ WDFDEVICE Device);
-
-[end of audio/Lama/ACX/DriverV2/Shared/Public.h]

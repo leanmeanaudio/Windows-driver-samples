@@ -34,6 +34,7 @@ extern "C" {
 #include "DriverSettings.h" // Contains LAMAConnect GUIDs and other settings
 #include "LAMAConnectShared.h" // Contains LAMA_CONNECT_SHARED_BUFFER definition
 
+
 #ifndef __INTELLISENSE__
 #include "device.tmh"
 #endif
@@ -929,5 +930,3 @@ VOID Codec_EvtIoDeviceControl(
 
     WdfRequestCompleteWithInformation(Request, status, information);
 }
-
-[end of audio/Lama/ACX/DriverV2/AudioCodec/Driver/Device.cpp]
