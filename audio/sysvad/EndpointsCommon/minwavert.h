@@ -197,6 +197,7 @@ protected:
     static BOOL                         g_LamaLoopbackBufferInitialized;
     static LONG                         g_LamaLoopbackClientCount; 
     static KSPIN_LOCK                   g_LamaLoopbackInitLock;
+    static BOOL                         g_LamaLoopbackInitLockInitialized; // Added static keyword
 
 public:
     DECLARE_PROPERTYHANDLER(Get_SoundDetectorSupportedPatterns);

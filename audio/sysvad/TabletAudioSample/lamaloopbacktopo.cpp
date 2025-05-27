@@ -4,9 +4,11 @@
 
 #include <ntddk.h>
 #include <portcls.h>
-#include <ksmedia.h>
-#include "sysvad.h" // For MINIFILTER_DESCRIPTOR, PHYSICALCONNECTIONTABLE, CreateMiniportTopologySYSVAD etc.
-#include "endpointscommon.h" // For KSNODETYPE_SUM, MiniportTopologySimpleAutomation etc.
+#include <ksmedia.h>         // For KSCATEGORY_AUDIO, KSNODETYPE_SUM, etc.
+#include "sysvad.h"          // For MINIFILTER_DESCRIPTOR, PHYSICALCONNECTIONTABLE, PinDataRangesBridge, CONNECTIONTYPE_*, etc. (assumed to resolve to ../common/sysvad.h)
+// Removed: #include "endpointscommon.h"
+// Added specific include from EndpointsCommon:
+#include "../EndpointsCommon/basetopo.h" // For MiniportTopologySimpleAutomation, CreateMiniportTopologySYSVAD
 #include "lamaloopbacktopo.h"
 
 //=============================================================================
@@ -24,11 +26,11 @@ static const KSPIN_DESCRIPTOR LamaLoopbackRender_TopoPins[] =
         NULL, // Interfaces
         0, // MediumsCount
         NULL, // Mediums
-        SIZEOF_ARRAY(PinDataRangesBridge), // DataRangesCount
-        PinDataRangesBridge, // DataRanges
+        SIZEOF_ARRAY(PinDataRangesBridge), // DataRangesCount (from sysvad.h -> common.h)
+        PinDataRangesBridge, // DataRanges (from sysvad.h -> common.h)
         KSPIN_DATAFLOW_IN, // DataFlow
         KSPIN_COMMUNICATION_SINK, // Communication
-        &KSCATEGORY_AUDIO, // Category
+        &KSCATEGORY_AUDIO, // Category (from ksmedia.h)
         NULL, // Name
         0  // ConstrainedDataRangesCount
     }
@@ -42,7 +44,7 @@ static const KSNODE_DESCRIPTOR LamaLoopbackRender_TopoNodes[] =
     // KSNODE_TOPO_SUM
     {
         NULL, // AutomationTable
-        &KSNODETYPE_SUM, // Type
+        &KSNODETYPE_SUM, // Type (from ksmedia.h)
         NULL // Name
     }
 };
@@ -74,24 +76,24 @@ static const KSPIN_CONNECT LamaLoopbackRender_TopoConnections[] =
 //
 // Automation table
 //
-static const PCAUTOMATION_TABLE LamaLoopbackRender_AutomationTable = &MiniportTopologySimpleAutomation;
+static const PCAUTOMATION_TABLE LamaLoopbackRender_AutomationTable = &MiniportTopologySimpleAutomation; // From basetopo.h
 
 //
 // Physical Connections Table
 //
-const PHYSICALCONNECTIONTABLE LamaLoopbackRenderTopologyPhysicalConnections[] =
+const PHYSICALCONNECTIONTABLE LamaLoopbackRenderTopologyPhysicalConnections[] = // PHYSICALCONNECTIONTABLE from sysvad.h
 {
     {
         KSPIN_TOPO_WAVEOUT_SOURCE,  // TopologyIn (Connects to Wave Out's bridge pin) - this is from perspective of wave miniport
         KSPIN_WAVE_RENDER_SOURCE,   // WaveOut (The bridge pin on the Wave miniport)
-        CONNECTIONTYPE_WAVE_OUTPUT  // This indicates data flows from Wave to Topology's KSPIN_TOPO_WAVEIN_SOURCE
+        CONNECTIONTYPE_WAVE_OUTPUT  // CONNECTIONTYPE_WAVE_OUTPUT from sysvad.h
     }
 };
 
 //
 // Topology Miniport Filter Descriptor
 //
-const MINIFILTER_DESCRIPTOR LamaLoopbackRenderTopoMiniportFilterDescriptor =
+const MINIFILTER_DESCRIPTOR LamaLoopbackRenderTopoMiniportFilterDescriptor = // MINIFILTER_DESCRIPTOR from sysvad.h
 {
     MINIFILTER_DESCRIPTOR_FLAGS_VERSION, // FlagsVersion
     &LamaLoopbackRender_AutomationTable, // AutomationTable
@@ -106,7 +108,7 @@ const MINIFILTER_DESCRIPTOR LamaLoopbackRenderTopoMiniportFilterDescriptor =
     LamaLoopbackRender_TopoConnections, // Connections
     0, // CategoryCount
     NULL, // Categories
-    CreateMiniportTopologySYSVAD, // MiniportCreate
+    CreateMiniportTopologySYSVAD, // MiniportCreate (from basetopo.h)
     DEFINE_KSFILTER_DESCRIPTOR(NULL) // Name (PortCls uses this for the symbolic link)
 };
 
@@ -125,11 +127,11 @@ static const KSPIN_DESCRIPTOR LamaLoopbackCapture_TopoPins[] =
         NULL, // Interfaces
         0, // MediumsCount
         NULL, // Mediums
-        SIZEOF_ARRAY(PinDataRangesBridge), // DataRangesCount
-        PinDataRangesBridge, // DataRanges
+        SIZEOF_ARRAY(PinDataRangesBridge), // DataRangesCount (from sysvad.h -> common.h)
+        PinDataRangesBridge, // DataRanges (from sysvad.h -> common.h)
         KSPIN_DATAFLOW_OUT, // DataFlow
         KSPIN_COMMUNICATION_SOURCE, // Communication
-        &KSCATEGORY_AUDIO, // Category
+        &KSCATEGORY_AUDIO, // Category (from ksmedia.h)
         NULL, // Name
         0 // ConstrainedDataRangesCount
     }
@@ -143,7 +145,7 @@ static const KSNODE_DESCRIPTOR LamaLoopbackCapture_TopoNodes[] =
     // KSNODE_TOPO_SUM
     {
         NULL, // AutomationTable
-        &KSNODETYPE_SUM, // Type
+        &KSNODETYPE_SUM, // Type (from ksmedia.h)
         NULL // Name
     }
 };
@@ -175,24 +177,24 @@ static const KSPIN_CONNECT LamaLoopbackCapture_TopoConnections[] =
 //
 // Automation table
 //
-static const PCAUTOMATION_TABLE LamaLoopbackCapture_AutomationTable = &MiniportTopologySimpleAutomation;
+static const PCAUTOMATION_TABLE LamaLoopbackCapture_AutomationTable = &MiniportTopologySimpleAutomation; // From basetopo.h
 
 //
 // Physical Connections Table
 //
-const PHYSICALCONNECTIONTABLE LamaLoopbackCaptureTopologyPhysicalConnections[] =
+const PHYSICALCONNECTIONTABLE LamaLoopbackCaptureTopologyPhysicalConnections[] = // PHYSICALCONNECTIONTABLE from sysvad.h
 {
     {
         KSPIN_TOPO_BRIDGE,          // TopologyOut (Connects to Wave In's bridge pin) - this is from perspective of wave miniport
         KSPIN_WAVE_BRIDGE,          // WaveIn (The bridge pin on the Wave miniport)
-        CONNECTIONTYPE_TOPOLOGY_OUTPUT // This indicates data flows from Topology's KSPIN_TOPO_LINEOUT_DEST to Wave
+        CONNECTIONTYPE_TOPOLOGY_OUTPUT // CONNECTIONTYPE_TOPOLOGY_OUTPUT from sysvad.h
     }
 };
 
 //
 // Topology Miniport Filter Descriptor
 //
-const MINIFILTER_DESCRIPTOR LamaLoopbackCaptureTopoMiniportFilterDescriptor =
+const MINIFILTER_DESCRIPTOR LamaLoopbackCaptureTopoMiniportFilterDescriptor = // MINIFILTER_DESCRIPTOR from sysvad.h
 {
     MINIFILTER_DESCRIPTOR_FLAGS_VERSION, // FlagsVersion
     &LamaLoopbackCapture_AutomationTable, // AutomationTable
@@ -207,6 +209,6 @@ const MINIFILTER_DESCRIPTOR LamaLoopbackCaptureTopoMiniportFilterDescriptor =
     LamaLoopbackCapture_TopoConnections, // Connections
     0, // CategoryCount
     NULL, // Categories
-    CreateMiniportTopologySYSVAD, // MiniportCreate
+    CreateMiniportTopologySYSVAD, // MiniportCreate (from basetopo.h)
     DEFINE_KSFILTER_DESCRIPTOR(NULL) // Name (PortCls uses this for the symbolic link)
 };

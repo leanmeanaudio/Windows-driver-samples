@@ -4,7 +4,12 @@
 #ifndef _SYSVAD_LAMALOOPBACKMINIPAIRS_H_
 #define _SYSVAD_LAMALOOPBACKMINIPAIRS_H_
 
-#include "minipairs.h" // For ENDPOINT_MINIPAIR, MINIFILTER_DESCRIPTOR, PIN_DEVICE_FORMATS_AND_MODES, PHYSICALCONNECTIONTABLE, etc.
+// Removed: #include "minipairs.h" 
+
+// Added direct includes:
+#include "../common/sysvad.h"     // For ENDPOINT_MINIPAIR, MINIFILTER_DESCRIPTOR, PHYSICALCONNECTIONTABLE, eDeviceType, CONNECTIONTYPE, PENDPOINT_MINIPAIR, etc.
+#include "../EndpointsCommon/minwavert.h" // For PIN_DEVICE_FORMATS_AND_MODES
+
 #include "lamaloopbacktoptable.h" // For Topology miniport filter descriptors & physical connections
 #include "lamaloopbackwavtable.h" // For Wave miniport filter descriptors & pin formats/modes
 
@@ -19,7 +24,7 @@ static ENDPOINT_MINIPAIR LamaLoopbackRenderMiniports =
 {
     // Topology Miniport
     {
-        (MINIPORT_DEVICE_TYPE)0x100, // eLamaLoopbackRenderDevice - Placeholder
+        (eDeviceType)0x100, // eLamaLoopbackRenderDevice - Placeholder, cast to eDeviceType
         L"TopologyLamaLoopbackRender",
         NULL,                               // PortFilterTemplateName
         CreateMiniportTopologySYSVAD,
@@ -29,7 +34,7 @@ static ENDPOINT_MINIPAIR LamaLoopbackRenderMiniports =
     },
     // Wave Miniport
     {
-        (MINIPORT_DEVICE_TYPE)0x100, // eLamaLoopbackRenderDevice - Placeholder
+        (eDeviceType)0x100, // eLamaLoopbackRenderDevice - Placeholder, cast to eDeviceType
         L"WaveLamaLoopbackRender",
         NULL,                               // PortFilterTemplateName
         CreateMiniportWaveRTSYSVAD,
@@ -55,7 +60,7 @@ static ENDPOINT_MINIPAIR LamaLoopbackCaptureMiniports =
 {
     // Topology Miniport
     {
-        (MINIPORT_DEVICE_TYPE)0x101, // eLamaLoopbackCaptureDevice - Placeholder
+        (eDeviceType)0x101, // eLamaLoopbackCaptureDevice - Placeholder, cast to eDeviceType
         L"TopologyLamaLoopbackCapture",
         NULL,                               // PortFilterTemplateName
         CreateMiniportTopologySYSVAD,
@@ -65,7 +70,7 @@ static ENDPOINT_MINIPAIR LamaLoopbackCaptureMiniports =
     },
     // Wave Miniport
     {
-        (MINIPORT_DEVICE_TYPE)0x101, // eLamaLoopbackCaptureDevice - Placeholder
+        (eDeviceType)0x101, // eLamaLoopbackCaptureDevice - Placeholder, cast to eDeviceType
         L"WaveLamaLoopbackCapture",
         NULL,                               // PortFilterTemplateName
         CreateMiniportWaveRTSYSVAD,

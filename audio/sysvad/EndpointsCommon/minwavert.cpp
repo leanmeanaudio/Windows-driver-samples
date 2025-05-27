@@ -3511,20 +3511,20 @@ exit:
 #pragma code_seg() // Ensure these are in non-paged code if called at DISPATCH_LEVEL
 BOOL CMiniportWaveRT::IsLamaLoopbackRender() const
 {
-    if (m_pMiniportPair && m_pMiniportPair->WaveMiniport.Name)
+    if (m_pMiniportPair && m_pMiniportPair->WaveName)
     {
         // Use _wcsicmp for case-insensitive comparison if PortFilterNameDeviceExtension could have different casing.
         // For this specific case, assuming exact match from lamaloopbackminipairs.h
-        return (wcscmp(m_pMiniportPair->WaveMiniport.Name, L"WaveLamaLoopbackRender") == 0);
+        return (wcscmp(m_pMiniportPair->WaveName, L"WaveLamaLoopbackRender") == 0);
     }
     return FALSE;
 }
 
 BOOL CMiniportWaveRT::IsLamaLoopbackCapture() const
 {
-    if (m_pMiniportPair && m_pMiniportPair->WaveMiniport.Name)
+    if (m_pMiniportPair && m_pMiniportPair->WaveName)
     {
-        return (wcscmp(m_pMiniportPair->WaveMiniport.Name, L"WaveLamaLoopbackCapture") == 0);
+        return (wcscmp(m_pMiniportPair->WaveName, L"WaveLamaLoopbackCapture") == 0);
     }
     return FALSE;
 }
@@ -4026,20 +4026,20 @@ Exit:
 #pragma code_seg() // Ensure these are in non-paged code if called at DISPATCH_LEVEL
 BOOL CMiniportWaveRT::IsLamaLoopbackRender() const
 {
-    if (m_pMiniportPair && m_pMiniportPair->WaveMiniport.Name)
+    if (m_pMiniportPair && m_pMiniportPair->WaveName)
     {
         // Use _wcsicmp for case-insensitive comparison if PortFilterNameDeviceExtension could have different casing.
         // For this specific case, assuming exact match from lamaloopbackminipairs.h
-        return (wcscmp(m_pMiniportPair->WaveMiniport.Name, L"WaveLamaLoopbackRender") == 0);
+        return (wcscmp(m_pMiniportPair->WaveName, L"WaveLamaLoopbackRender") == 0);
     }
     return FALSE;
 }
 
 BOOL CMiniportWaveRT::IsLamaLoopbackCapture() const
 {
-    if (m_pMiniportPair && m_pMiniportPair->WaveMiniport.Name)
+    if (m_pMiniportPair && m_pMiniportPair->WaveName)
     {
-        return (wcscmp(m_pMiniportPair->WaveMiniport.Name, L"WaveLamaLoopbackCapture") == 0);
+        return (wcscmp(m_pMiniportPair->WaveName, L"WaveLamaLoopbackCapture") == 0);
     }
     return FALSE;
 }
