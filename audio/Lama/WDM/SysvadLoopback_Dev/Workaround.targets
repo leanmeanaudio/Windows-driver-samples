@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <!-- Force include our compatibility headers -->
+      <ForcedIncludeFiles>driver_compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      
+      <!-- Add preprocessor definitions to fix compatibility issues -->
+      <PreprocessorDefinitions>
+        WIN32;
+        _WINDOWS;
+        KSMEDIA_COMPAT_FIXED;
+        NTDDI_VERSION=0x06010000;
+        _WIN32_WINNT=0x0601;
+        %(PreprocessorDefinitions)
+      </PreprocessorDefinitions>
+      
+      <!-- Disable specific warnings -->
+      <DisableSpecificWarnings>4603;4627;4986;4987;4996;4201;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      
+      <!-- Additional compiler flags for compatibility -->
+      <AdditionalOptions>/FI"driver_compat.h" %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

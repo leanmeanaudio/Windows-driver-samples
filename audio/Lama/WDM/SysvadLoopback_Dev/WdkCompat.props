@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalOptions>@$(MSBuildThisFileDirectory)wdk_compat.rsp %(AdditionalOptions)</AdditionalOptions>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <WarningLevel>2</WarningLevel>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <!-- Define additional include paths if needed -->
+    <IncludePath>$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <!-- Add preprocessor definitions to fix compatibility issues -->
+      <PreprocessorDefinitions>KSMEDIA_COMPAT_FIXED;BOOL=int;WINAPI=__stdcall;KS_DEFINED_GUID;KSDDKAPI=;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      
+      <!-- Disable specific warnings -->
+      <DisableSpecificWarnings>4603;4627;4986;4987;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      
+      <!-- Additional compiler flags for compatibility -->
+      <AdditionalOptions>/Zc:wchar_t- /Zc:forScope- /Zc:rvalueCast- %(AdditionalOptions)</AdditionalOptions>
+      
+      <!-- Use an older C++ standard to match the WDK -->
+      <LanguageStandard>stdcpp14</LanguageStandard>
+      
+      <!-- Ignore standard includes and directly provide compatibility definitions -->
+      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
+      
+      <!-- Treat specific errors as warnings instead -->
+      <TreatSpecificWarningsAsErrors></TreatSpecificWarningsAsErrors>
+      
+      <!-- Force include our compatibility header -->
+      <ForcedIncludeFiles>wdk_compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+    </ClCompile>
+    <Link>
+      <!-- Additional libraries needed for building -->
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup />
+</Project>

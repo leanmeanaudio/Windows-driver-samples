@@ -1,0 +1,42 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "LAMAConnect", "LAMAConnect", "{0D3B6287-146E-4700-B2EE-11D520014FEA}"
+	ProjectSection(SolutionItems) = preProject
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LAMAConnectDriver", "AudioCodec.vcxproj", "{C575002D-5FDE-43C7-AB19-EE846A20083A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|ARM64 = Debug|ARM64
+		Debug|x64 = Debug|x64
+		Release|ARM64 = Release|ARM64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Debug|ARM64.Build.0 = Debug|ARM64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Debug|ARM64.Deploy.0 = Debug|ARM64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Debug|x64.ActiveCfg = Debug|x64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Debug|x64.Build.0 = Debug|x64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Debug|x64.Deploy.0 = Debug|x64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Release|ARM64.ActiveCfg = Release|ARM64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Release|ARM64.Build.0 = Release|ARM64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Release|ARM64.Deploy.0 = Release|ARM64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Release|x64.ActiveCfg = Release|x64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Release|x64.Build.0 = Release|x64
+		{C575002D-5FDE-43C7-AB19-EE846A20083A}.Release|x64.Deploy.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{C575002D-5FDE-43C7-AB19-EE846A20083A} = {0D3B6287-146E-4700-B2EE-11D520014FEA}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8E3043F2-1C76-4A4A-9C60-A645BD6CBF24}
+	EndGlobalSection
+EndGlobal
