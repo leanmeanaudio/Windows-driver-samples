@@ -42,64 +42,16 @@
 #include <wdmguid.h>
 #include <devpropdef.h>
 
+/* Standard WDK audio and data type headers */
+#include <ks.h>
+#include <ksmedia.h>
+#include <stdint.h>
+
 /* Security and ETW headers */
 #ifdef LAMA_CONNECT_ENABLE_ETW
 #include <evntrace.h>
 #include <evntprov.h>
 #endif
-
-/* Define basic types we need */
-#ifndef WORD
-typedef unsigned short WORD;
-#endif
-#ifndef DWORD  
-typedef unsigned long DWORD;
-#endif
-
-/*
- * =============================================================================
- * AUDIO FORMAT STRUCTURES
- * =============================================================================
- */
-
-#define WAVE_FORMAT_EXTENSIBLE 0xFFFE
-
-typedef struct _WAVEFORMATEX {
-    WORD  wFormatTag;
-    WORD  nChannels;
-    DWORD nSamplesPerSec;
-    DWORD nAvgBytesPerSec;
-    WORD  nBlockAlign;
-    WORD  wBitsPerSample;
-    WORD  cbSize;
-} WAVEFORMATEX, *PWAVEFORMATEX;
-
-typedef struct _WAVEFORMATEXTENSIBLE {
-    WAVEFORMATEX Format;
-    union {
-        WORD wValidBitsPerSample;
-        WORD wSamplesPerBlock;
-        WORD wReserved;
-    } Samples;
-    DWORD dwChannelMask;
-    GUID SubFormat;
-} WAVEFORMATEXTENSIBLE, *PWAVEFORMATEXTENSIBLE;
-
-/* KSDATAFORMAT definition */
-typedef struct _KSDATAFORMAT {
-    ULONG   FormatSize;
-    ULONG   Flags;
-    ULONG   SampleSize;
-    ULONG   Reserved;
-    GUID    MajorFormat;
-    GUID    SubFormat;
-    GUID    Specifier;
-} KSDATAFORMAT, *PKSDATAFORMAT;
-
-typedef struct _KSDATAFORMAT_WAVEFORMATEXTENSIBLE {
-    KSDATAFORMAT         DataFormat;
-    WAVEFORMATEXTENSIBLE WaveFormatExt;
-} KSDATAFORMAT_WAVEFORMATEXTENSIBLE, *PKSDATAFORMAT_WAVEFORMATEXTENSIBLE;
 
 /*
  * =============================================================================
@@ -137,21 +89,7 @@ typedef struct _KSDATAFORMAT_WAVEFORMATEXTENSIBLE {
  * =============================================================================
  */
 
-/* Required GUIDs */
-DEFINE_GUID(KSDATAFORMAT_TYPE_AUDIO, 
-    0x73647561L, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
-
-DEFINE_GUID(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT,
-    0x00000003L, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
-
-DEFINE_GUID(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX,
-    0x05589f81L, 0xc356, 0x11ce, 0xbf, 0x01, 0x00, 0xaa, 0x00, 0x55, 0x59, 0x5a);
-
-DEFINE_GUID(KSPROPSETID_Pin,
-    0x8C134960L, 0x51AD, 0x11CF, 0x87, 0x8A, 0x94, 0xF8, 0x01, 0xC1, 0x00, 0x00);
-
-DEFINE_GUID(KSPIN_CATEGORY_AUDIO,
-    0xFBF6F530L, 0x07B9, 0x11D2, 0xA7, 0x1E, 0x00, 0x00, 0xF8, 0x00, 0x47, 0x88);
+/* Required GUIDs are now included from ks.h and ksmedia.h */
 
 /* ETW Provider GUID */
 #ifdef LAMA_CONNECT_ENABLE_ETW

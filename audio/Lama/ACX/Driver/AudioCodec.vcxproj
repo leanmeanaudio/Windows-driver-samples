@@ -133,16 +133,16 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppKernelMode>true</WppKernelMode>
       <!-- UPDATED: Latest ACX include paths -->
-      <AdditionalIncludeDirectories>$(DDK_INC_PATH);$(DDK_INC_PATH)\km;$(DDK_INC_PATH)\km\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);$(DDK_INC_PATH)\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(DDK_INC_PATH);$(DDK_INC_PATH)\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);$(DDK_INC_PATH)\..\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <!-- UPDATED: Security and debugging flags -->
-      <PreprocessorDefinitions>_KERNEL_MODE_=1;KERNEL_MODE=1;ACX_VERSION_MAJOR=$(ACX_VERSION_MAJOR);ACX_VERSION_MINOR=$(ACX_VERSION_MINOR);KMDF_VERSION_MAJOR=$(KMDF_VERSION_MAJOR);KMDF_VERSION_MINOR=$(KMDF_VERSION_MINOR);LAMA_CONNECT_DEBUG=1;LAMA_CONNECT_ENABLE_ETW=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ACX_VERSION_MAJOR=$(ACX_VERSION_MAJOR);ACX_VERSION_MINOR=$(ACX_VERSION_MINOR);KMDF_VERSION_MAJOR=$(KMDF_VERSION_MAJOR);KMDF_VERSION_MINOR=$(KMDF_VERSION_MINOR);LAMA_CONNECT_DEBUG=1;LAMA_CONNECT_ENABLE_ETW=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
       <DriverSign>true</DriverSign>
       <!-- UPDATED: Security enhancements -->
       <ControlFlowGuard>Guard</ControlFlowGuard>
-      <SpectreMitigation>true</SpectreMitigation>
-      <AdditionalOptions>/kernel /GS /analyze %(AdditionalOptions)</AdditionalOptions>
+      <SpectreMitigation>Spectre</SpectreMitigation>
+      <AdditionalOptions>/U_WIN32_WINNT /UWINVER /UNTDDI_VERSION /kernel /GS /analyze /UWINNT /D_WIN32_WINNT=0x0A000010 /DWINVER=0x0A000010 /DNTDDI_VERSION=0x0A000010 %(AdditionalOptions) /kernel /ZH:SHA_256 /W4 /wd4996 /wd4055 /wd4201 /wd4214 /DPOOL_NX_OPTIN_PROBE=1 /DPOOL_ZEROING_OPTIN=1 /GS /guard:cf /Gm- /Zc:wchar_t /Zc:forScope /Zc:inline /fp:precise /WX /diagnostics:column /sdl /d2FH4- /INCREMENTAL:NO /Zi /DEBUG /Od /RTC1 /errorReport:prompt /GF /Gw /std:c11 /DNDIS_MINIPORT_DRIVER /DWIN_ENCODING_UTF8 /DUNICODE /D_UNICODE</AdditionalOptions>
     </ClCompile>
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
@@ -162,19 +162,19 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppKernelMode>true</WppKernelMode>
       <!-- UPDATED: Latest ACX include paths -->
-      <AdditionalIncludeDirectories>$(DDK_INC_PATH);$(DDK_INC_PATH)\km;$(DDK_INC_PATH)\km\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);$(DDK_INC_PATH)\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(DDK_INC_PATH);$(DDK_INC_PATH)\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);$(DDK_INC_PATH)\..\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <!-- UPDATED: Production preprocessor definitions -->
-      <PreprocessorDefinitions>_KERNEL_MODE_=1;KERNEL_MODE=1;_AMD64_=1;_WIN64=1;WINAPI_PARTITION_KERNEL=1;WINAPI_PARTITION_DESKTOP=0;ACX_VERSION_MAJOR=$(ACX_VERSION_MAJOR);ACX_VERSION_MINOR=$(ACX_VERSION_MINOR);KMDF_VERSION_MAJOR=$(KMDF_VERSION_MAJOR);KMDF_VERSION_MINOR=$(KMDF_VERSION_MINOR);LAMA_CONNECT_PRODUCTION=1;LAMA_CONNECT_ENABLE_ETW=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_AMD64_=1;_WIN64=1;WINAPI_PARTITION_KERNEL=1;WINAPI_PARTITION_DESKTOP=0;ACX_VERSION_MAJOR=$(ACX_VERSION_MAJOR);ACX_VERSION_MINOR=$(ACX_VERSION_MINOR);KMDF_VERSION_MAJOR=$(KMDF_VERSION_MAJOR);KMDF_VERSION_MINOR=$(KMDF_VERSION_MINOR);LAMA_CONNECT_PRODUCTION=1;LAMA_CONNECT_ENABLE_ETW=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
       <DriverSign>true</DriverSign>
       <!-- UPDATED: Production security enhancements -->
       <ControlFlowGuard>Guard</ControlFlowGuard>
-      <SpectreMitigation>true</SpectreMitigation>
+      <SpectreMitigation>Spectre</SpectreMitigation>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalOptions>/kernel /GS /GL /analyze %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/U_WIN32_WINNT /UWINVER /UNTDDI_VERSION /kernel /GS /GL /analyze /UWINNT /D_WIN32_WINNT=0x0A000010 /DWINVER=0x0A000010 /DNTDDI_VERSION=0x0A000010 %(AdditionalOptions) /kernel /ZH:SHA_256 /W4 /wd4996 /wd4055 /wd4201 /wd4214 /DPOOL_NX_OPTIN_PROBE=1 /DPOOL_ZEROING_OPTIN=1 /GS /guard:cf /Gm- /Zc:wchar_t /Zc:forScope /Zc:inline /fp:precise /WX /diagnostics:column /sdl /d2FH4- /INCREMENTAL:NO /Zi /DEBUG /O2 /errorReport:prompt /GF /Gw /std:c11 /DNDIS_MINIPORT_DRIVER /DWIN_ENCODING_UTF8 /DUNICODE /D_UNICODE</AdditionalOptions>
     </ClCompile>
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
@@ -196,7 +196,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppKernelMode>true</WppKernelMode>
       <!-- UPDATED: Latest ACX include paths -->
-      <AdditionalIncludeDirectories>$(DDK_INC_PATH);$(DDK_INC_PATH)\km;$(DDK_INC_PATH)\km\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);$(DDK_INC_PATH)\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(DDK_INC_PATH);$(DDK_INC_PATH)\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);$(DDK_INC_PATH)\..\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <!-- UPDATED: ARM64 specific definitions -->
       <PreprocessorDefinitions>_KERNEL_MODE_=1;KERNEL_MODE=1;_ARM64_=1;_WIN64=1;WINAPI_PARTITION_KERNEL=1;WINAPI_PARTITION_DESKTOP=0;ACX_VERSION_MAJOR=$(ACX_VERSION_MAJOR);ACX_VERSION_MINOR=$(ACX_VERSION_MINOR);KMDF_VERSION_MAJOR=$(KMDF_VERSION_MAJOR);KMDF_VERSION_MINOR=$(KMDF_VERSION_MINOR);LAMA_CONNECT_DEBUG=1;LAMA_CONNECT_ENABLE_ETW=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>
@@ -204,8 +204,8 @@
       <DriverSign>true</DriverSign>
       <!-- UPDATED: ARM64 security enhancements -->
       <ControlFlowGuard>Guard</ControlFlowGuard>
-      <SpectreMitigation>true</SpectreMitigation>
-      <AdditionalOptions>/kernel /GS /analyze %(AdditionalOptions)</AdditionalOptions>
+      <SpectreMitigation>Spectre</SpectreMitigation>
+      <AdditionalOptions>/kernel /GS /analyze /UWINNT /D_WIN32_WINNT=0x0A000010 /DWINVER=0x0A000010 /DNTDDI_VERSION=0x0A000010 %(AdditionalOptions) /kernel /ZH:SHA_256 /W4 /wd4996 /wd4055 /wd4201 /wd4214 /DPOOL_NX_OPTIN_PROBE=1 /DPOOL_ZEROING_OPTIN=1 /GS /guard:cf /Gm- /Zc:wchar_t /Zc:forScope /Zc:inline /fp:precise /WX /diagnostics:column /sdl /d2FH4- /INCREMENTAL:NO /Zi /DEBUG /Od /RTC1 /errorReport:prompt /GF /Gw /std:c11 /D_KERNEL_MODE /DNDIS_MINIPORT_DRIVER /DWIN_ENCODING_UTF8 /DUNICODE /D_UNICODE /D CDECL=__cdecl</AdditionalOptions>
     </ClCompile>
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
@@ -224,7 +224,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppKernelMode>true</WppKernelMode>
       <!-- UPDATED: Latest ACX include paths -->
-      <AdditionalIncludeDirectories>$(DDK_INC_PATH);$(DDK_INC_PATH)\km;$(DDK_INC_PATH)\km\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);$(DDK_INC_PATH)\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(DDK_INC_PATH);$(DDK_INC_PATH)\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);$(DDK_INC_PATH)\..\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <!-- UPDATED: ARM64 production definitions -->
       <PreprocessorDefinitions>_KERNEL_MODE_=1;KERNEL_MODE=1;_ARM64_=1;_WIN64=1;WINAPI_PARTITION_KERNEL=1;WINAPI_PARTITION_DESKTOP=0;ACX_VERSION_MAJOR=$(ACX_VERSION_MAJOR);ACX_VERSION_MINOR=$(ACX_VERSION_MINOR);KMDF_VERSION_MAJOR=$(KMDF_VERSION_MAJOR);KMDF_VERSION_MINOR=$(KMDF_VERSION_MINOR);LAMA_CONNECT_PRODUCTION=1;LAMA_CONNECT_ENABLE_ETW=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>
@@ -232,11 +232,11 @@
       <DriverSign>true</DriverSign>
       <!-- UPDATED: ARM64 production security -->
       <ControlFlowGuard>Guard</ControlFlowGuard>
-      <SpectreMitigation>true</SpectreMitigation>
+      <SpectreMitigation>Spectre</SpectreMitigation>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalOptions>/kernel /GS /GL /analyze %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/kernel /GS /GL /analyze /UWINNT /D_WIN32_WINNT=0x0A000010 /DWINVER=0x0A000010 /DNTDDI_VERSION=0x0A000010 %(AdditionalOptions) /kernel /ZH:SHA_256 /W4 /wd4996 /wd4055 /wd4201 /wd4214 /DPOOL_NX_OPTIN_PROBE=1 /DPOOL_ZEROING_OPTIN=1 /GS /guard:cf /Gm- /Zc:wchar_t /Zc:forScope /Zc:inline /fp:precise /WX /diagnostics:column /sdl /d2FH4- /INCREMENTAL:NO /Zi /DEBUG /O2 /errorReport:prompt /GF /Gw /std:c11 /D_KERNEL_MODE /DNDIS_MINIPORT_DRIVER /DWIN_ENCODING_UTF8 /DUNICODE /D_UNICODE /D CDECL=__cdecl</AdditionalOptions>
     </ClCompile>
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>

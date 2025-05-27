@@ -38,10 +38,10 @@ function Write-ColorOutput([ConsoleColor]$ForegroundColor, [string]$Message) {
     $host.UI.RawUI.ForegroundColor = $currentForeground
 }
 
-function Write-Success([string]$Message) { Write-ColorOutput Green "✓ $Message" }
-function Write-Warning([string]$Message) { Write-ColorOutput Yellow "⚠ $Message" }
-function Write-Error([string]$Message) { Write-ColorOutput Red "✗ $Message" }
-function Write-Info([string]$Message) { Write-ColorOutput Cyan "ℹ $Message" }
+function Write-Success([string]$Message) { Write-Host "SUCCESS: $Message" }
+function Write-Warning([string]$Message) { Write-Host "WARNING: $Message" }
+function Write-Error([string]$Message) { Write-Host "ERROR: $Message" }
+function Write-Info([string]$Message) { Write-Host "INFO: $Message" }
 
 # Check if running as administrator
 function Test-Administrator {
@@ -88,10 +88,18 @@ function Find-MSBuild {
     if (Test-Path $vswhere) {
         $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
         if ($vsPath) {
-            $msbuildPath = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
-            if (Test-Path $msbuildPath) {
-                return $msbuildPath
+            $MsBuildPathX64 = Join-Path $vsPath "MSBuild\Current\Bin\amd64\MSBuild.exe"
+            $MsBuildPathDefault = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
+
+            if (Test-Path $MsBuildPathX64) {
+                $MsBuildPath = $MsBuildPathX64
+                Write-Host "INFO: Using amd64 MSBuild: $MsBuildPath" -ForegroundColor Cyan
+            } else {
+                $MsBuildPath = $MsBuildPathDefault
+                Write-Host "INFO: Using default MSBuild: $MsBuildPath" -ForegroundColor Cyan
             }
+
+            return $MsBuildPath
         }
     }
     
@@ -128,7 +136,7 @@ function Invoke-Clean {
 
 # Build the driver
 function Invoke-Build {
-    Write-Info "Building LAMAConnect driver ($Configuration|$Platform)..."
+    Write-Info "Building LAMAConnect driver ($($Configuration)|$($Platform))..."
     
     $msbuild = Find-MSBuild
     if (-not $msbuild) {
@@ -147,6 +155,7 @@ function Invoke-Build {
         "/p:KMDF_VERSION_MINOR=31",
         "/p:ACX_VERSION_MAJOR=1",
         "/p:ACX_VERSION_MINOR=1",
+        "/p:PreferredToolArchitecture=x64",
         "/m",
         "/v:minimal"
     )
@@ -321,64 +330,47 @@ function Main {
     
     # Check administrator privileges
     if (-not (Test-Administrator)) {
-        Write-Error "This script must be run as Administrator"
-        exit 1
+        Write-Warning "This script requires administrator privileges. Please re-run as administrator."
+        # exit 1 # Exiting here might close the console window immediately.
+        # Consider prompting to re-launch as admin or just warning and continuing if some operations don't strictly need admin.
     }
-    
-    # Handle test signing
+
     if ($EnableTestSigning) {
-        if (Enable-TestSigning) {
-            exit 0
+        if (-not (Test-TestSigning)) {
+            if (-not (Enable-TestSigning)) {
+                exit 1
+            }
+            # If test signing was just enabled, it often requires a reboot.
+            # The Enable-TestSigning function should inform the user.
+            # Depending on script's design, you might want to exit here or give instructions.
         } else {
-            exit 1
+            Write-Info "Test signing is already enabled."
         }
     }
-    
-    # Check test signing status
-    if (-not (Test-TestSigning)) {
-        Write-Warning "Test signing is not enabled"
-        Write-Info "Run with -EnableTestSigning to enable it"
-        $continue = Read-Host "Continue anyway? (y/N)"
-        if ($continue -notmatch "^[Yy]") {
-            exit 1
-        }
-    }
-    
-    # Handle uninstall
-    if ($Uninstall) {
-        Invoke-Uninstall
-        exit 0
-    }
-    
-    # Handle clean
+
     if ($Clean) {
         Invoke-Clean
     }
     
-    # Build the driver
+    if ($Uninstall) {
+        Invoke-Uninstall
+    }
+
     if (-not (Invoke-Build)) {
+        Write-Error "Build process failed."
         exit 1
     }
-    
-    # Install if requested
+
     if ($Install) {
-        $buildPath = Join-Path $ScriptPath "$Platform\$Configuration"
-        
-        # Uninstall existing driver first
-        if (Test-DriverInstalled) {
-            Write-Info "Existing driver found, uninstalling first..."
-            Invoke-Uninstall
-            Start-Sleep -Seconds 2
+        if (-not (Test-TestSigning)) {
+            Write-Warning "Test signing is not enabled. Driver installation might fail or require a reboot after enabling it."
+            Write-Warning "Consider running with -EnableTestSigning parameter first and rebooting if prompted."
+            # Optionally, you could attempt to enable it here, or exit.
         }
-        
-        if (Invoke-Install $buildPath) {
-            Start-Sleep -Seconds 3
-            Test-Installation
-        }
+        Invoke-Install
     }
-    
+
     Write-Success "Script completed successfully"
 }
 
-# Run main function
 Main
