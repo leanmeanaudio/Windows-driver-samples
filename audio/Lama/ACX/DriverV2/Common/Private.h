@@ -29,9 +29,7 @@ Environment:
 #include <wdm.h>
 #include <windef.h>
 #include "cpp_utils.h"
-#include <mmsystem.h>
-#include <ks.h>
-#include <ksmedia.h>
+#include <mmsystem.h> // Removed: User-mode header, can conflict in kernel mode
 #include "NewDelete.h"
 
 /* make prototypes usable from C++ */
@@ -39,7 +37,12 @@ Environment:
 extern "C" {
 #endif
 
+// Define GUIDs once, ensure this is before headers that use DEFINE_GUID like ksmedia.h
 #include <initguid.h>
+
+#include <ks.h>      // Moved here, inside extern "C"
+#include <ksmedia.h> // Moved here, inside extern "C"
+
 #include <ntddk.h>
 #include <ntstrsafe.h>
 #include <ntintsafe.h>

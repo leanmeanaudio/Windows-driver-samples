@@ -42,6 +42,25 @@ extern "C" {
 // Typically, LAMAConnectShared.h would only contain type definitions and constants.
 #include "..\AudioCodec\Driver\LAMAConnectShared.h" 
 
+// Forward declarations for audio bridge
+class CCaptureStreamEngine;
+class CRenderStreamEngine;
+
+// Audio Bridge Functions for LAMAConnect (Updated with format conversion)
+extern "C" {
+    VOID RegisterCaptureEngine(CCaptureStreamEngine* engine);
+    VOID RegisterRenderEngine(CRenderStreamEngine* engine);
+    VOID UnregisterCaptureEngine(CCaptureStreamEngine* engine);
+    VOID UnregisterRenderEngine(CRenderStreamEngine* engine);
+
+    // Updated signatures with format info
+    BOOLEAN GetPluginAudioData(PVOID audioData, ULONG frames, ULONG channels, ULONG sampleRate, ULONG bitsPerSample);
+    VOID SetWindowsAudioData(PVOID audioData, ULONG frames, ULONG channels, ULONG sampleRate, ULONG bitsPerSample);
+
+    // These remain the same (always float for JUCE side)
+    VOID SetPluginAudioData(float* audioData, ULONG frames, ULONG channels, ULONG sampleRate);
+    BOOLEAN GetWindowsAudioData(float* audioData, ULONG frames, ULONG channels, ULONG sampleRate);
+}
 
 #define PAGED_CODE_SEG __declspec(code_seg("PAGE"))
 #define INIT_CODE_SEG __declspec(code_seg("INIT"))

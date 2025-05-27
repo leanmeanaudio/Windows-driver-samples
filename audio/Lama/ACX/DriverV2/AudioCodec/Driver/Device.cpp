@@ -34,22 +34,22 @@ extern "C" {
 // Explicit forward declarations for Zw* functions to ensure C linkage
 extern "C" {
     NTSYSAPI
-    NTSTATUS
-    NTAPI
-    ZwCreateEvent (
-        PHANDLE EventHandle,
-        ACCESS_MASK DesiredAccess,
-        POBJECT_ATTRIBUTES ObjectAttributes,
-        EVENT_TYPE EventType,
-        BOOLEAN InitialState
+        NTSTATUS
+        NTAPI
+        ZwCreateEvent(
+            PHANDLE EventHandle,
+            ACCESS_MASK DesiredAccess,
+            POBJECT_ATTRIBUTES ObjectAttributes,
+            EVENT_TYPE EventType,
+            BOOLEAN InitialState
         );
 
     NTSYSAPI
-    NTSTATUS
-    NTAPI
-    ZwSetEvent (
-        HANDLE EventHandle,
-        PLONG PreviousState
+        NTSTATUS
+        NTAPI
+        ZwSetEvent(
+            HANDLE EventHandle,
+            PLONG PreviousState
         );
 }
 
@@ -70,6 +70,42 @@ UNICODE_STRING g_RegistryPath = { 0 };      // This is used to store the registr
 ULONG DeviceDriverTag = DRIVER_TAG;
 
 ULONG IdleTimeoutMsec = IDLE_TIMEOUT_MSEC;
+
+// Global audio bridge buffers for connecting LAMAConnect to ACX
+// These buffers act as the bridge between the JUCE plugin and Windows ACX audio system
+typedef struct _AUDIO_BRIDGE_CONTEXT {
+    KSPIN_LOCK SpinLock;
+
+    // Plugin to Windows (Capture direction - plugin sends audio for Windows apps to record)
+    float* PluginToCaptureBuffer;
+    ULONG PluginToCaptureBufferSize;
+    ULONG PluginToCaptureSampleRate;
+    ULONG PluginToCaptureChannels;
+    ULONG PluginToCaptureFrames;
+    BOOLEAN PluginToCaptureDataReady;
+
+    // Windows to Plugin (Render direction - Windows apps play audio that plugin receives)
+    float* RenderToPluginBuffer;
+    ULONG RenderToPluginBufferSize;
+    ULONG RenderToPluginSampleRate;
+    ULONG RenderToPluginChannels;
+    ULONG RenderToPluginFrames;
+    BOOLEAN RenderToPluginDataReady;
+
+    // Currently active stream engines
+    CCaptureStreamEngine* ActiveCaptureEngine;
+    CRenderStreamEngine* ActiveRenderEngine;
+
+} AUDIO_BRIDGE_CONTEXT, * PAUDIO_BRIDGE_CONTEXT;
+
+// Global instance
+AUDIO_BRIDGE_CONTEXT g_AudioBridge = { 0 };
+
+// Forward declarations (matching the extern "C" linkage from Public.h)
+extern "C" {
+    VOID InitializeAudioBridge();
+    VOID CleanupAudioBridge();
+}
 
 // Forward declaration of the IOCTL handler
 VOID Codec_EvtIoDeviceControl(
@@ -168,6 +204,9 @@ Return Value:
 
     UNREFERENCED_PARAMETER(Driver);
 
+    // Initialize audio bridge
+    InitializeAudioBridge();
+
     //
     // The driver calls this DDI in its AddDevice callback before creating the PnP device.
     // ACX uses this call to add default/standard settings for the device to be created.
@@ -233,7 +272,7 @@ Return Value:
         // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: WdfDeviceCreateDeviceInterface failed %!STATUS!\n", status));
         return status;
     }
-    
+
     // Initialize symbolicLinkName locally
     RtlInitUnicodeString(&symbolicLinkName, L"\\DosDevices\\LAMAConnect0");
 
@@ -528,7 +567,7 @@ Return Value:
     WDFDEVICE               device;
     PCODEC_DEVICE_CONTEXT   devCtx;
 
-    PAGED_CODE(); 
+    PAGED_CODE();
 
     device = (WDFDEVICE)WdfDevice;
     devCtx = GetCodecDeviceContext(device);
@@ -538,13 +577,13 @@ Return Value:
     if (devCtx->Capture)
     {
         CodecC_CircuitCleanup(devCtx->Capture);
-        devCtx->Capture = nullptr; 
+        devCtx->Capture = nullptr;
     }
 
     // LAMAConnect specific cleanup
     // This check ensures cleanup happens if resources were allocated,
     // regardless of whether UNREGISTER was called.
-    if (devCtx->SharedMemoryBase) 
+    if (devCtx->SharedMemoryBase)
     {
         NTSTATUS unmapStatus = ZwUnmapViewOfSection(NtCurrentProcess(), devCtx->SharedMemoryBase);
         if (!NT_SUCCESS(unmapStatus)) {
@@ -565,8 +604,256 @@ Return Value:
     }
     devCtx->LamaClientRegistered = FALSE; // Ensure flag is reset
 
+    // Cleanup audio bridge
+    CleanupAudioBridge();
+
     // Note: LamaIoQueue is a WDF object and will be parented to the WDFDEVICE,
     // so it should be automatically cleaned up by WDF unless specific non-default parentage was set.
+}
+
+// Audio Bridge Implementation
+extern "C" VOID InitializeAudioBridge()
+{
+    RtlZeroMemory(&g_AudioBridge, sizeof(g_AudioBridge));
+    KeInitializeSpinLock(&g_AudioBridge.SpinLock);
+
+    // Allocate bridge buffers for maximum supported configuration
+    ULONG maxFrames = LAMA_CONNECT_MAX_BUFFER_SIZE;
+    ULONG maxChannels = LAMA_CONNECT_MAX_CHANNELS;
+    ULONG bufferSize = maxFrames * maxChannels * sizeof(float);
+
+    g_AudioBridge.PluginToCaptureBuffer = (float*)ExAllocatePool2(POOL_FLAG_NON_PAGED, bufferSize, DRIVER_TAG);
+    g_AudioBridge.PluginToCaptureBufferSize = bufferSize;
+
+    g_AudioBridge.RenderToPluginBuffer = (float*)ExAllocatePool2(POOL_FLAG_NON_PAGED, bufferSize, DRIVER_TAG);
+    g_AudioBridge.RenderToPluginBufferSize = bufferSize;
+
+    if (g_AudioBridge.PluginToCaptureBuffer) {
+        RtlZeroMemory(g_AudioBridge.PluginToCaptureBuffer, bufferSize);
+    }
+    if (g_AudioBridge.RenderToPluginBuffer) {
+        RtlZeroMemory(g_AudioBridge.RenderToPluginBuffer, bufferSize);
+    }
+}
+
+extern "C" VOID CleanupAudioBridge()
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+
+    if (g_AudioBridge.PluginToCaptureBuffer) {
+        ExFreePoolWithTag(g_AudioBridge.PluginToCaptureBuffer, DRIVER_TAG);
+        g_AudioBridge.PluginToCaptureBuffer = nullptr;
+    }
+
+    if (g_AudioBridge.RenderToPluginBuffer) {
+        ExFreePoolWithTag(g_AudioBridge.RenderToPluginBuffer, DRIVER_TAG);
+        g_AudioBridge.RenderToPluginBuffer = nullptr;
+    }
+
+    g_AudioBridge.ActiveCaptureEngine = nullptr;
+    g_AudioBridge.ActiveRenderEngine = nullptr;
+
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
+}
+
+// Audio format conversion helpers (internal functions - no extern "C" needed)
+VOID ConvertToFloat(PVOID sourceData, float* destData, ULONG frames, ULONG channels, ULONG bitsPerSample)
+{
+    ULONG totalSamples = frames * channels;
+
+    switch (bitsPerSample) {
+    case 16: {
+        SHORT* src = (SHORT*)sourceData;
+        for (ULONG i = 0; i < totalSamples; i++) {
+            destData[i] = (float)src[i] / 32768.0f; // Convert 16-bit to float (-1.0 to 1.0)
+        }
+        break;
+    }
+    case 24: {
+        // 24-bit is usually packed as 32-bit with 8 bits padding
+        LONG* src = (LONG*)sourceData;
+        for (ULONG i = 0; i < totalSamples; i++) {
+            destData[i] = (float)(src[i] >> 8) / 8388608.0f; // Convert 24-bit to float
+        }
+        break;
+    }
+    case 32: {
+        // Assume 32-bit float - direct copy
+        RtlCopyMemory(destData, sourceData, totalSamples * sizeof(float));
+        break;
+    }
+    default: {
+        // Unknown format - fill with silence
+        RtlZeroMemory(destData, totalSamples * sizeof(float));
+        break;
+    }
+    }
+}
+
+VOID ConvertFromFloat(float* sourceData, PVOID destData, ULONG frames, ULONG channels, ULONG bitsPerSample)
+{
+    ULONG totalSamples = frames * channels;
+
+    switch (bitsPerSample) {
+    case 16: {
+        SHORT* dest = (SHORT*)destData;
+        for (ULONG i = 0; i < totalSamples; i++) {
+            float sample = sourceData[i];
+            // Clamp to [-1.0, 1.0] and convert to 16-bit
+            if (sample > 1.0f) sample = 1.0f;
+            if (sample < -1.0f) sample = -1.0f;
+            dest[i] = (SHORT)(sample * 32767.0f);
+        }
+        break;
+    }
+    case 24: {
+        // 24-bit as 32-bit with padding
+        LONG* dest = (LONG*)destData;
+        for (ULONG i = 0; i < totalSamples; i++) {
+            float sample = sourceData[i];
+            if (sample > 1.0f) sample = 1.0f;
+            if (sample < -1.0f) sample = -1.0f;
+            dest[i] = (LONG)(sample * 8388607.0f) << 8; // Convert to 24-bit in 32-bit container
+        }
+        break;
+    }
+    case 32: {
+        // Assume 32-bit float - direct copy
+        RtlCopyMemory(destData, sourceData, totalSamples * sizeof(float));
+        break;
+    }
+    default: {
+        // Unknown format - fill with silence
+        ULONG bytesToZero = frames * channels * (bitsPerSample / 8);
+        RtlZeroMemory(destData, bytesToZero);
+        break;
+    }
+    }
+}
+
+extern "C" VOID SetPluginAudioData(float* audioData, ULONG frames, ULONG channels, ULONG sampleRate)
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+
+    if (g_AudioBridge.PluginToCaptureBuffer && audioData) {
+        ULONG bytesToCopy = frames * channels * sizeof(float);
+        if (bytesToCopy <= g_AudioBridge.PluginToCaptureBufferSize) {
+            RtlCopyMemory(g_AudioBridge.PluginToCaptureBuffer, audioData, bytesToCopy);
+            g_AudioBridge.PluginToCaptureFrames = frames;
+            g_AudioBridge.PluginToCaptureChannels = channels;
+            g_AudioBridge.PluginToCaptureSampleRate = sampleRate;
+            g_AudioBridge.PluginToCaptureDataReady = TRUE;
+        }
+    }
+
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
+}
+
+extern "C" BOOLEAN GetPluginAudioData(PVOID audioData, ULONG frames, ULONG channels, ULONG sampleRate, ULONG bitsPerSample)
+{
+    KIRQL oldIrql;
+    BOOLEAN result = FALSE;
+
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+
+    if (g_AudioBridge.PluginToCaptureDataReady &&
+        g_AudioBridge.PluginToCaptureBuffer &&
+        audioData &&
+        g_AudioBridge.PluginToCaptureFrames == frames &&
+        g_AudioBridge.PluginToCaptureChannels == channels &&
+        g_AudioBridge.PluginToCaptureSampleRate == sampleRate) {
+
+        // Convert from float (plugin format) to ACX format
+        ConvertFromFloat(g_AudioBridge.PluginToCaptureBuffer, audioData, frames, channels, bitsPerSample);
+        g_AudioBridge.PluginToCaptureDataReady = FALSE;
+        result = TRUE;
+    }
+
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
+    return result;
+}
+
+extern "C" VOID SetWindowsAudioData(PVOID audioData, ULONG frames, ULONG channels, ULONG sampleRate, ULONG bitsPerSample)
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+
+    if (g_AudioBridge.RenderToPluginBuffer && audioData) {
+        ULONG floatBytesToCopy = frames * channels * sizeof(float);
+        if (floatBytesToCopy <= g_AudioBridge.RenderToPluginBufferSize) {
+            // Convert from ACX format to float (plugin format)
+            ConvertToFloat(audioData, g_AudioBridge.RenderToPluginBuffer, frames, channels, bitsPerSample);
+            g_AudioBridge.RenderToPluginFrames = frames;
+            g_AudioBridge.RenderToPluginChannels = channels;
+            g_AudioBridge.RenderToPluginSampleRate = sampleRate;
+            g_AudioBridge.RenderToPluginDataReady = TRUE;
+        }
+    }
+
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
+}
+
+extern "C" BOOLEAN GetWindowsAudioData(float* audioData, ULONG frames, ULONG channels, ULONG sampleRate)
+{
+    KIRQL oldIrql;
+    BOOLEAN result = FALSE;
+
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+
+    if (g_AudioBridge.RenderToPluginDataReady &&
+        g_AudioBridge.RenderToPluginBuffer &&
+        audioData &&
+        g_AudioBridge.RenderToPluginFrames == frames &&
+        g_AudioBridge.RenderToPluginChannels == channels &&
+        g_AudioBridge.RenderToPluginSampleRate == sampleRate) {
+
+        ULONG bytesToCopy = frames * channels * sizeof(float);
+        RtlCopyMemory(audioData, g_AudioBridge.RenderToPluginBuffer, bytesToCopy);
+        g_AudioBridge.RenderToPluginDataReady = FALSE;
+        result = TRUE;
+    }
+
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
+    return result;
+}
+
+// Register stream engines with audio bridge
+extern "C" VOID RegisterCaptureEngine(CCaptureStreamEngine* engine)
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+    g_AudioBridge.ActiveCaptureEngine = engine;
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
+}
+
+extern "C" VOID RegisterRenderEngine(CRenderStreamEngine* engine)
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+    g_AudioBridge.ActiveRenderEngine = engine;
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
+}
+
+extern "C" VOID UnregisterCaptureEngine(CCaptureStreamEngine* engine)
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+    if (g_AudioBridge.ActiveCaptureEngine == engine) {
+        g_AudioBridge.ActiveCaptureEngine = nullptr;
+    }
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
+}
+
+extern "C" VOID UnregisterRenderEngine(CRenderStreamEngine* engine)
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_AudioBridge.SpinLock, &oldIrql);
+    if (g_AudioBridge.ActiveRenderEngine == engine) {
+        g_AudioBridge.ActiveRenderEngine = nullptr;
+    }
+    KeReleaseSpinLock(&g_AudioBridge.SpinLock, oldIrql);
 }
 
 // Definition of the IOCTL handler function
@@ -578,7 +865,7 @@ VOID Codec_EvtIoDeviceControl(
     _In_ ULONG      IoControlCode
 )
 {
-    PAGED_CODE(); 
+    PAGED_CODE();
 
     NTSTATUS status = STATUS_INVALID_DEVICE_REQUEST; // Default status
     ULONG_PTR information = 0;                       // Default information
@@ -589,365 +876,366 @@ VOID Codec_EvtIoDeviceControl(
 
     switch (IoControlCode)
     {
-        case IOCTL_LAMA_CONNECT_REGISTER:
+    case IOCTL_LAMA_CONNECT_REGISTER:
+    {
+        UNREFERENCED_PARAMETER(InputBufferLength);
+        UNREFERENCED_PARAMETER(OutputBufferLength);
+        // 1. Check if already registered
+        if (devCtx->LamaClientRegistered)
         {
-            UNREFERENCED_PARAMETER(InputBufferLength); 
-            UNREFERENCED_PARAMETER(OutputBufferLength);
-            // 1. Check if already registered
-            if (devCtx->LamaClientRegistered)
-            {
-                status = STATUS_DEVICE_ALREADY_ATTACHED;
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: Client already registered.\n"));
-                break; 
-            }
-
-            // 3. Define maxFramesForSharedBuffer
-            UINT32 maxFramesForSharedBuffer = LAMA_CONNECT_MAX_BUFFER_SIZE;
-
-            // 4. Calculate pluginToDriverDataSize
-            SIZE_T pluginToDriverDataSize = (SIZE_T)LAMA_CONNECT_MAX_CHANNELS * maxFramesForSharedBuffer * sizeof(float);
-
-            // 5. Calculate driverToPluginDataSize
-            SIZE_T driverToPluginDataSize = pluginToDriverDataSize;
-
-            // 6. Calculate totalDataSize
-            SIZE_T totalDataSize = pluginToDriverDataSize + driverToPluginDataSize;
-
-            // 7. Calculate requiredSharedMemSize
-            SIZE_T requiredSharedMemSize = sizeof(LAMA_CONNECT_SHARED_BUFFER) + totalDataSize;
-
-            // 8. Align this size to page boundaries
-            SIZE_T alignedSharedMemSize = LAMA_ALIGN_TO_PAGE(requiredSharedMemSize);
-            // Ensure LAMA_ALIGN_TO_PAGE is available or define it: ( (size) + PAGE_SIZE - 1 ) & ~(PAGE_SIZE - 1)
-
-            // 9. Create Shared Memory Section
-            UNICODE_STRING sectionName;
-            // Using the macro from LAMAConnectShared.h (assuming it's defined as a L"" string)
-            RtlInitUnicodeString(&sectionName, LAMA_CONNECT_SHARED_MEMORY_NAME L"0"); // Append instance "0"
-
-            OBJECT_ATTRIBUTES objAttributes;
-            InitializeObjectAttributes(&objAttributes, &sectionName, OBJ_KERNEL_HANDLE | OBJ_OPENIF | OBJ_CASE_INSENSITIVE, NULL, NULL);
-            
-            LARGE_INTEGER sectionSize;
-            sectionSize.QuadPart = alignedSharedMemSize;
-
-            status = ZwCreateSection(&devCtx->SharedMemoryHandle, SECTION_ALL_ACCESS, &objAttributes, &sectionSize, PAGE_READWRITE, SEC_COMMIT, NULL);
-            if (!NT_SUCCESS(status))
-            {
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwCreateSection failed %!STATUS!\n", status));
-                devCtx->SharedMemoryHandle = NULL; // Ensure handle is NULL on failure
-                break;
-            }
-
-            // 10. Map Shared Memory View
-            SIZE_T viewSize = alignedSharedMemSize; // For ZwMapViewOfSection, this is both input and output for size
-            status = ZwMapViewOfSection(devCtx->SharedMemoryHandle, NtCurrentProcess(), &devCtx->SharedMemoryBase, 0, 
-                                        alignedSharedMemSize, // CommitSize, use full for non-large page backed sections
-                                        NULL, &viewSize, ViewShare, 0, PAGE_READWRITE);
-            if (!NT_SUCCESS(status))
-            {
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwMapViewOfSection failed %!STATUS!\n", status));
-                ZwClose(devCtx->SharedMemoryHandle);
-                devCtx->SharedMemoryHandle = NULL;
-                devCtx->SharedMemoryBase = NULL; // Ensure base is NULL on failure
-                break;
-            }
-            devCtx->SharedBuffer = (PLAMA_CONNECT_SHARED_BUFFER)devCtx->SharedMemoryBase;
-
-            // 11. Initialize LAMA_CONNECT_SHARED_BUFFER
-            RtlZeroMemory(devCtx->SharedBuffer, alignedSharedMemSize);
-            devCtx->SharedBuffer->Magic = LAMA_SHARED_BUFFER_MAGIC;
-            devCtx->SharedBuffer->Version = LAMA_SHARED_BUFFER_VERSION;
-            devCtx->SharedBuffer->StructSize = sizeof(LAMA_CONNECT_SHARED_BUFFER);
-            devCtx->SharedBuffer->ChannelCount = LAMA_CONNECT_MAX_CHANNELS; // Driver fixed to this
-            devCtx->SharedBuffer->SampleRate = 0; // To be set by IOCTL_LAMA_CONNECT_SET_FORMAT
-            devCtx->SharedBuffer->BufferSize = 0; // To be set by IOCTL_LAMA_CONNECT_SET_FORMAT
-            devCtx->SharedBuffer->BytesPerFrame = LAMA_CONNECT_MAX_CHANNELS * sizeof(float);
-            devCtx->SharedBuffer->BufferState = BUFFER_STATE_EMPTY;
-            devCtx->SharedBuffer->IsActive = FALSE; // Initialize IsActive to FALSE
-            devCtx->SharedBuffer->PluginToDriverBufferOffset = sizeof(LAMA_CONNECT_SHARED_BUFFER);
-            devCtx->SharedBuffer->DriverToPluginBufferOffset = sizeof(LAMA_CONNECT_SHARED_BUFFER) + (UINT32)pluginToDriverDataSize;
-            devCtx->SharedBuffer->PluginToDriverBufferSize = (UINT32)pluginToDriverDataSize;
-            devCtx->SharedBuffer->DriverToPluginBufferSize = (UINT32)driverToPluginDataSize;
-            // devCtx->SharedBuffer->ValidationChecksum = LAMACalculateSimpleChecksum((UINT8*)devCtx->SharedBuffer, sizeof(LAMA_CONNECT_SHARED_BUFFER) - sizeof(UINT32));
-
-
-            // 12. Create Completion Event
-            UNICODE_STRING eventName;
-            RtlInitUnicodeString(&eventName, LAMA_CONNECT_COMPLETION_EVENT_NAME L"0"); // Append instance "0"
-
-            InitializeObjectAttributes(&objAttributes, &eventName, OBJ_KERNEL_HANDLE | OBJ_OPENIF | OBJ_CASE_INSENSITIVE, NULL, NULL);
-            status = ZwCreateEvent(&devCtx->CompletionEventHandle, EVENT_ALL_ACCESS, &objAttributes, NotificationEvent, FALSE); // NotificationEvent, InitialState = FALSE
-            if (!NT_SUCCESS(status))
-            {
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwCreateEvent failed %!STATUS!\n", status));
-                ZwUnmapViewOfSection(NtCurrentProcess(), devCtx->SharedMemoryBase);
-                devCtx->SharedMemoryBase = NULL;
-                ZwClose(devCtx->SharedMemoryHandle);
-                devCtx->SharedMemoryHandle = NULL;
-                devCtx->CompletionEventHandle = NULL; // Ensure handle is NULL
-                break;
-            }
-
-            // 13. Set client registered flag
-            devCtx->LamaClientRegistered = TRUE;
-            status = STATUS_SUCCESS;
-            information = 0; // No information to return for this IOCTL on success.
-            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "LAMA: Client registered successfully.\n"));
+            status = STATUS_DEVICE_ALREADY_ATTACHED;
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: Client already registered.\n"));
+            break;
         }
-        break; 
 
-        case IOCTL_LAMA_CONNECT_UNREGISTER:
+        // 3. Define maxFramesForSharedBuffer
+        UINT32 maxFramesForSharedBuffer = LAMA_CONNECT_MAX_BUFFER_SIZE;
+
+        // 4. Calculate pluginToDriverDataSize
+        SIZE_T pluginToDriverDataSize = (SIZE_T)LAMA_CONNECT_MAX_CHANNELS * maxFramesForSharedBuffer * sizeof(float);
+
+        // 5. Calculate driverToPluginDataSize
+        SIZE_T driverToPluginDataSize = pluginToDriverDataSize;
+
+        // 6. Calculate totalDataSize
+        SIZE_T totalDataSize = pluginToDriverDataSize + driverToPluginDataSize;
+
+        // 7. Calculate requiredSharedMemSize
+        SIZE_T requiredSharedMemSize = sizeof(LAMA_CONNECT_SHARED_BUFFER) + totalDataSize;
+
+        // 8. Align this size to page boundaries
+        SIZE_T alignedSharedMemSize = LAMA_ALIGN_TO_PAGE(requiredSharedMemSize);
+        // Ensure LAMA_ALIGN_TO_PAGE is available or define it: ( (size) + PAGE_SIZE - 1 ) & ~(PAGE_SIZE - 1)
+
+        // 9. Create Shared Memory Section
+        UNICODE_STRING sectionName;
+        // Using the macro from LAMAConnectShared.h (assuming it's defined as a L"" string)
+        RtlInitUnicodeString(&sectionName, LAMA_CONNECT_SHARED_MEMORY_NAME L"0"); // Append instance "0"
+
+        OBJECT_ATTRIBUTES objAttributes;
+        InitializeObjectAttributes(&objAttributes, &sectionName, OBJ_KERNEL_HANDLE | OBJ_OPENIF | OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+        LARGE_INTEGER sectionSize;
+        sectionSize.QuadPart = alignedSharedMemSize;
+
+        status = ZwCreateSection(&devCtx->SharedMemoryHandle, SECTION_ALL_ACCESS, &objAttributes, &sectionSize, PAGE_READWRITE, SEC_COMMIT, NULL);
+        if (!NT_SUCCESS(status))
         {
-            UNREFERENCED_PARAMETER(InputBufferLength); 
-            UNREFERENCED_PARAMETER(OutputBufferLength);
-            // 2. Retrieve device context - already done above
-            // 3. Check LamaClientRegistered
-            if (!devCtx->LamaClientRegistered)
-            {
-                status = STATUS_DEVICE_NOT_CONNECTED;
-                information = 0;
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: No client to unregister.\n"));
-                break;
-            }
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwCreateSection failed %!STATUS!\n", status));
+            devCtx->SharedMemoryHandle = NULL; // Ensure handle is NULL on failure
+            break;
+        }
 
-            // 4. Set IsActive to FALSE
-            if (devCtx->SharedBuffer)
-            {
-                devCtx->SharedBuffer->IsActive = FALSE; // Ensure IsActive is FALSE on unregister
-            }
+        // 10. Map Shared Memory View
+        SIZE_T viewSize = alignedSharedMemSize; // For ZwMapViewOfSection, this is both input and output for size
+        status = ZwMapViewOfSection(devCtx->SharedMemoryHandle, NtCurrentProcess(), &devCtx->SharedMemoryBase, 0,
+            alignedSharedMemSize, // CommitSize, use full for non-large page backed sections
+            NULL, &viewSize, ViewShare, 0, PAGE_READWRITE);
+        if (!NT_SUCCESS(status))
+        {
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwMapViewOfSection failed %!STATUS!\n", status));
+            ZwClose(devCtx->SharedMemoryHandle);
+            devCtx->SharedMemoryHandle = NULL;
+            devCtx->SharedMemoryBase = NULL; // Ensure base is NULL on failure
+            break;
+        }
+        devCtx->SharedBuffer = (PLAMA_CONNECT_SHARED_BUFFER)devCtx->SharedMemoryBase;
 
-            // 5. Unmap SharedMemoryBase
-            if (devCtx->SharedMemoryBase)
-            {
-                NTSTATUS unmapStatus = ZwUnmapViewOfSection(NtCurrentProcess(), devCtx->SharedMemoryBase);
-                if (!NT_SUCCESS(unmapStatus))
-                {
-                    // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwUnmapViewOfSection failed %!STATUS!\n", unmapStatus));
-                    // Log error but continue cleanup
-                }
-                devCtx->SharedMemoryBase = NULL;
-                devCtx->SharedBuffer = NULL; // SharedBuffer pointed into SharedMemoryBase
-            }
+        // 11. Initialize LAMA_CONNECT_SHARED_BUFFER
+        RtlZeroMemory(devCtx->SharedBuffer, alignedSharedMemSize);
+        devCtx->SharedBuffer->Magic = LAMA_SHARED_BUFFER_MAGIC;
+        devCtx->SharedBuffer->Version = LAMA_SHARED_BUFFER_VERSION;
+        devCtx->SharedBuffer->StructSize = sizeof(LAMA_CONNECT_SHARED_BUFFER);
+        devCtx->SharedBuffer->ChannelCount = LAMA_CONNECT_MAX_CHANNELS; // Driver fixed to this
+        devCtx->SharedBuffer->SampleRate = 0; // To be set by IOCTL_LAMA_CONNECT_SET_FORMAT
+        devCtx->SharedBuffer->BufferSize = 0; // To be set by IOCTL_LAMA_CONNECT_SET_FORMAT
+        devCtx->SharedBuffer->BytesPerFrame = LAMA_CONNECT_MAX_CHANNELS * sizeof(float);
+        devCtx->SharedBuffer->BufferState = BUFFER_STATE_EMPTY;
+        devCtx->SharedBuffer->IsActive = FALSE; // Initialize IsActive to FALSE
+        devCtx->SharedBuffer->PluginToDriverBufferOffset = sizeof(LAMA_CONNECT_SHARED_BUFFER);
+        devCtx->SharedBuffer->DriverToPluginBufferOffset = sizeof(LAMA_CONNECT_SHARED_BUFFER) + (UINT32)pluginToDriverDataSize;
+        devCtx->SharedBuffer->PluginToDriverBufferSize = (UINT32)pluginToDriverDataSize;
+        devCtx->SharedBuffer->DriverToPluginBufferSize = (UINT32)driverToPluginDataSize;
+        // devCtx->SharedBuffer->ValidationChecksum = LAMACalculateSimpleChecksum((UINT8*)devCtx->SharedBuffer, sizeof(LAMA_CONNECT_SHARED_BUFFER) - sizeof(UINT32));
 
-            // 6. Close SharedMemoryHandle
-            if (devCtx->SharedMemoryHandle)
-            {
-                NTSTATUS closeStatus = ZwClose(devCtx->SharedMemoryHandle);
-                if (!NT_SUCCESS(closeStatus))
-                {
-                    // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwClose SharedMemoryHandle failed %!STATUS!\n", closeStatus));
-                    // Log error but continue cleanup
-                }
-                devCtx->SharedMemoryHandle = NULL;
-            }
 
-            // 7. Close CompletionEventHandle
-            if (devCtx->CompletionEventHandle)
-            {
-                NTSTATUS closeStatus = ZwClose(devCtx->CompletionEventHandle);
-                if (!NT_SUCCESS(closeStatus))
-                {
-                    // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwClose CompletionEventHandle failed %!STATUS!\n", closeStatus));
-                    // Log error but continue cleanup
-                }
-                devCtx->CompletionEventHandle = NULL;
-            }
+        // 12. Create Completion Event
+        UNICODE_STRING eventName;
+        RtlInitUnicodeString(&eventName, LAMA_CONNECT_COMPLETION_EVENT_NAME L"0"); // Append instance "0"
 
-            // 8. Reset LamaClientRegistered flag
-            devCtx->LamaClientRegistered = FALSE;
-            // 9. Reset LamaSampleRate
-            devCtx->LamaSampleRate = 0;
-            // 10. Reset LamaBufferSizeFrames
-            devCtx->LamaBufferSizeFrames = 0;
-            // 11. Reset LamaPluginChannelCount
-            devCtx->LamaPluginChannelCount = 0;
+        InitializeObjectAttributes(&objAttributes, &eventName, OBJ_KERNEL_HANDLE | OBJ_OPENIF | OBJ_CASE_INSENSITIVE, NULL, NULL);
+        status = ZwCreateEvent(&devCtx->CompletionEventHandle, EVENT_ALL_ACCESS, &objAttributes, NotificationEvent, FALSE); // NotificationEvent, InitialState = FALSE
+        if (!NT_SUCCESS(status))
+        {
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwCreateEvent failed %!STATUS!\n", status));
+            ZwUnmapViewOfSection(NtCurrentProcess(), devCtx->SharedMemoryBase);
+            devCtx->SharedMemoryBase = NULL;
+            ZwClose(devCtx->SharedMemoryHandle);
+            devCtx->SharedMemoryHandle = NULL;
+            devCtx->CompletionEventHandle = NULL; // Ensure handle is NULL
+            break;
+        }
 
-            status = STATUS_SUCCESS;
+        // 13. Set client registered flag
+        devCtx->LamaClientRegistered = TRUE;
+        status = STATUS_SUCCESS;
+        information = 0; // No information to return for this IOCTL on success.
+        // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "LAMA: Client registered successfully.\n"));
+    }
+    break;
+
+    case IOCTL_LAMA_CONNECT_UNREGISTER:
+    {
+        UNREFERENCED_PARAMETER(InputBufferLength);
+        UNREFERENCED_PARAMETER(OutputBufferLength);
+        // 2. Retrieve device context - already done above
+        // 3. Check LamaClientRegistered
+        if (!devCtx->LamaClientRegistered)
+        {
+            status = STATUS_DEVICE_NOT_CONNECTED;
             information = 0;
-            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "LAMA: Client unregistered successfully.\n"));
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: No client to unregister.\n"));
+            break;
         }
-        break;
 
-        case IOCTL_LAMA_CONNECT_SET_FORMAT:
+        // 4. Set IsActive to FALSE
+        if (devCtx->SharedBuffer)
         {
-            PLAMA_CONNECT_FORMAT clientFormat = NULL;
-            size_t retrievedBufferLength = 0; 
-
-            UNREFERENCED_PARAMETER(OutputBufferLength);
-
-            if (!devCtx->LamaClientRegistered)
-            {
-                status = STATUS_DEVICE_NOT_CONNECTED;
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - No client registered.\n"));
-                break;
-            }
-            
-            if (devCtx->SharedBuffer == NULL) // Should not happen if LamaClientRegistered is TRUE
-            {
-                status = STATUS_INVALID_DEVICE_STATE;
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - SharedBuffer is NULL despite client registration.\n"));
-                break;
-            }
-
-            status = WdfRequestRetrieveInputBuffer(Request, sizeof(LAMA_CONNECT_FORMAT), (PVOID*)&clientFormat, &retrievedBufferLength);
-            if (!NT_SUCCESS(status))
-            {
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - WdfRequestRetrieveInputBuffer failed %!STATUS!\n", status));
-                break; 
-            }
-
-            if (retrievedBufferLength < sizeof(LAMA_CONNECT_FORMAT))
-            {
-                status = STATUS_BUFFER_TOO_SMALL;
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - Input buffer too small (%Iu bytes).\n", retrievedBufferLength));
-                break;
-            }
-
-            if (!LAMAIsValidFormat(clientFormat))
-            {
-                status = STATUS_INVALID_PARAMETER;
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - LAMAIsValidFormat failed.\n"));
-                break;
-            }
-
-            devCtx->LamaSampleRate = clientFormat->SampleRate;
-            devCtx->LamaBufferSizeFrames = clientFormat->BufferSize;
-            devCtx->LamaPluginChannelCount = clientFormat->ChannelCount; 
-
-            devCtx->SharedBuffer->SampleRate = clientFormat->SampleRate;
-            devCtx->SharedBuffer->BufferSize = clientFormat->BufferSize; 
-            devCtx->SharedBuffer->IsActive = TRUE; // Set IsActive to TRUE after format is set
-            
-            status = STATUS_SUCCESS;
-            information = 0; 
+            devCtx->SharedBuffer->IsActive = FALSE; // Ensure IsActive is FALSE on unregister
         }
-        break;
 
-        case IOCTL_LAMA_CONNECT_TRIGGER_PROCESSING:
+        // 5. Unmap SharedMemoryBase
+        if (devCtx->SharedMemoryBase)
         {
-            PUINT32 pFramesInThisBlock = NULL;
-            size_t retrievedInputBufferLength = 0; 
-            UNREFERENCED_PARAMETER(OutputBufferLength);
-
-            if (!devCtx->LamaClientRegistered) { status = STATUS_DEVICE_NOT_CONNECTED; break; }
-            if (!devCtx->SharedBuffer) { status = STATUS_INVALID_DEVICE_STATE; break; }
-            if (devCtx->LamaSampleRate == 0 || devCtx->LamaBufferSizeFrames == 0 || !devCtx->SharedBuffer->IsActive) { // Added IsActive check
-                status = STATUS_DEVICE_NOT_READY; 
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: TRIGGER - Device not ready (SR:%u, BS:%u, Active:%d)\n", 
-                //    devCtx->LamaSampleRate, devCtx->LamaBufferSizeFrames, devCtx->SharedBuffer->IsActive));
-                break; 
+            NTSTATUS unmapStatus = ZwUnmapViewOfSection(NtCurrentProcess(), devCtx->SharedMemoryBase);
+            if (!NT_SUCCESS(unmapStatus))
+            {
+                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwUnmapViewOfSection failed %!STATUS!\n", unmapStatus));
+                // Log error but continue cleanup
             }
+            devCtx->SharedMemoryBase = NULL;
+            devCtx->SharedBuffer = NULL; // SharedBuffer pointed into SharedMemoryBase
+        }
 
-            status = WdfRequestRetrieveInputBuffer(Request, sizeof(UINT32), (PVOID*)&pFramesInThisBlock, &retrievedInputBufferLength);
-            if (!NT_SUCCESS(status)) { /* KdPrint for error */ break; }
-            if (retrievedInputBufferLength < sizeof(UINT32)) { status = STATUS_BUFFER_TOO_SMALL; break; }
-            
-            UINT32 framesInThisBlock = *pFramesInThisBlock;
-
-            if (framesInThisBlock == 0 || framesInThisBlock > devCtx->LamaBufferSizeFrames) {
-                status = STATUS_INVALID_PARAMETER;
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: TRIGGER - Invalid framesInThisBlock: %u (Max: %u)\n", framesInThisBlock, devCtx->LamaBufferSizeFrames));
-                break;
+        // 6. Close SharedMemoryHandle
+        if (devCtx->SharedMemoryHandle)
+        {
+            NTSTATUS closeStatus = ZwClose(devCtx->SharedMemoryHandle);
+            if (!NT_SUCCESS(closeStatus))
+            {
+                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwClose SharedMemoryHandle failed %!STATUS!\n", closeStatus));
+                // Log error but continue cleanup
             }
+            devCtx->SharedMemoryHandle = NULL;
+        }
 
-            if (devCtx->SharedBuffer->BufferState == BUFFER_STATE_PROCESSING) {
-                status = STATUS_DEVICE_BUSY; 
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, "LAMA: TRIGGER - Buffer already in processing state.\n"));
-                break; 
+        // 7. Close CompletionEventHandle
+        if (devCtx->CompletionEventHandle)
+        {
+            NTSTATUS closeStatus = ZwClose(devCtx->CompletionEventHandle);
+            if (!NT_SUCCESS(closeStatus))
+            {
+                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: ZwClose CompletionEventHandle failed %!STATUS!\n", closeStatus));
+                // Log error but continue cleanup
             }
-            devCtx->SharedBuffer->BufferState = BUFFER_STATE_PROCESSING;
+            devCtx->CompletionEventHandle = NULL;
+        }
 
-            PBYTE sharedMemoryBaseBytes = (PBYTE)devCtx->SharedMemoryBase;
-            // float* pluginToDriverBuffer = (float*)(sharedMemoryBaseBytes + devCtx->SharedBuffer->PluginToDriverBufferOffset); // Input buffer not used for silence
-            float* driverToPluginBuffer = (float*)(sharedMemoryBaseBytes + devCtx->SharedBuffer->DriverToPluginBufferOffset);
+        // 8. Reset LamaClientRegistered flag
+        devCtx->LamaClientRegistered = FALSE;
+        // 9. Reset LamaSampleRate
+        devCtx->LamaSampleRate = 0;
+        // 10. Reset LamaBufferSizeFrames
+        devCtx->LamaBufferSizeFrames = 0;
+        // 11. Reset LamaPluginChannelCount
+        devCtx->LamaPluginChannelCount = 0;
 
+        status = STATUS_SUCCESS;
+        information = 0;
+        // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "LAMA: Client unregistered successfully.\n"));
+    }
+    break;
+
+    case IOCTL_LAMA_CONNECT_SET_FORMAT:
+    {
+        PLAMA_CONNECT_FORMAT clientFormat = NULL;
+        size_t retrievedBufferLength = 0;
+
+        UNREFERENCED_PARAMETER(OutputBufferLength);
+
+        if (!devCtx->LamaClientRegistered)
+        {
+            status = STATUS_DEVICE_NOT_CONNECTED;
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - No client registered.\n"));
+            break;
+        }
+
+        if (devCtx->SharedBuffer == NULL) // Should not happen if LamaClientRegistered is TRUE
+        {
+            status = STATUS_INVALID_DEVICE_STATE;
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - SharedBuffer is NULL despite client registration.\n"));
+            break;
+        }
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(LAMA_CONNECT_FORMAT), (PVOID*)&clientFormat, &retrievedBufferLength);
+        if (!NT_SUCCESS(status))
+        {
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - WdfRequestRetrieveInputBuffer failed %!STATUS!\n", status));
+            break;
+        }
+
+        if (retrievedBufferLength < sizeof(LAMA_CONNECT_FORMAT))
+        {
+            status = STATUS_BUFFER_TOO_SMALL;
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - Input buffer too small (%Iu bytes).\n", retrievedBufferLength));
+            break;
+        }
+
+        if (!LAMAIsValidFormat(clientFormat))
+        {
+            status = STATUS_INVALID_PARAMETER;
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: SET_FORMAT - LAMAIsValidFormat failed.\n"));
+            break;
+        }
+
+        devCtx->LamaSampleRate = clientFormat->SampleRate;
+        devCtx->LamaBufferSizeFrames = clientFormat->BufferSize;
+        devCtx->LamaPluginChannelCount = clientFormat->ChannelCount;
+
+        devCtx->SharedBuffer->SampleRate = clientFormat->SampleRate;
+        devCtx->SharedBuffer->BufferSize = clientFormat->BufferSize;
+        devCtx->SharedBuffer->IsActive = TRUE; // Set IsActive to TRUE after format is set
+
+        status = STATUS_SUCCESS;
+        information = 0;
+    }
+    break;
+
+    case IOCTL_LAMA_CONNECT_TRIGGER_PROCESSING:
+    {
+        PUINT32 pFramesInThisBlock = NULL;
+        size_t retrievedInputBufferLength = 0;
+        UNREFERENCED_PARAMETER(OutputBufferLength);
+
+        if (!devCtx->LamaClientRegistered) { status = STATUS_DEVICE_NOT_CONNECTED; break; }
+        if (!devCtx->SharedBuffer) { status = STATUS_INVALID_DEVICE_STATE; break; }
+        if (devCtx->LamaSampleRate == 0 || devCtx->LamaBufferSizeFrames == 0 || !devCtx->SharedBuffer->IsActive) { // Added IsActive check
+            status = STATUS_DEVICE_NOT_READY;
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: TRIGGER - Device not ready (SR:%u, BS:%u, Active:%d)\n", 
+            //    devCtx->LamaSampleRate, devCtx->LamaBufferSizeFrames, devCtx->SharedBuffer->IsActive));
+            break;
+        }
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(UINT32), (PVOID*)&pFramesInThisBlock, &retrievedInputBufferLength);
+        if (!NT_SUCCESS(status)) { /* KdPrint for error */ break; }
+        if (retrievedInputBufferLength < sizeof(UINT32)) { status = STATUS_BUFFER_TOO_SMALL; break; }
+
+        UINT32 framesInThisBlock = *pFramesInThisBlock;
+
+        if (framesInThisBlock == 0 || framesInThisBlock > devCtx->LamaBufferSizeFrames) {
+            status = STATUS_INVALID_PARAMETER;
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: TRIGGER - Invalid framesInThisBlock: %u (Max: %u)\n", framesInThisBlock, devCtx->LamaBufferSizeFrames));
+            break;
+        }
+
+        if (devCtx->SharedBuffer->BufferState == BUFFER_STATE_PROCESSING) {
+            status = STATUS_DEVICE_BUSY;
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, "LAMA: TRIGGER - Buffer already in processing state.\n"));
+            break;
+        }
+        devCtx->SharedBuffer->BufferState = BUFFER_STATE_PROCESSING;
+
+        PBYTE sharedMemoryBaseBytes = (PBYTE)devCtx->SharedMemoryBase;
+        float* pluginToDriverBuffer = (float*)(sharedMemoryBaseBytes + devCtx->SharedBuffer->PluginToDriverBufferOffset);
+        float* driverToPluginBuffer = (float*)(sharedMemoryBaseBytes + devCtx->SharedBuffer->DriverToPluginBufferOffset);
+
+        // *** THIS IS THE KEY CHANGE - ACTUAL AUDIO ROUTING ***
+
+        // Route plugin audio to capture system (so Windows apps can record it)
+        SetPluginAudioData(pluginToDriverBuffer, framesInThisBlock, devCtx->LamaPluginChannelCount, devCtx->LamaSampleRate);
+
+        // Route Windows render audio to plugin (what Windows apps are playing)
+        if (!GetWindowsAudioData(driverToPluginBuffer, framesInThisBlock, devCtx->LamaPluginChannelCount, devCtx->LamaSampleRate)) {
+            // No Windows audio available, fill with silence
             ULONG bytesToZero = devCtx->LamaPluginChannelCount * framesInThisBlock * sizeof(float);
-            
+
             // Bounds check for bytesToZero
             if (bytesToZero > devCtx->SharedBuffer->DriverToPluginBufferSize) {
-                 // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, "LAMA: TRIGGER - bytesToZero %u exceeds DriverToPluginBufferSize %u. Capping.\n", 
-                 //    bytesToZero, devCtx->SharedBuffer->DriverToPluginBufferSize));
-                 bytesToZero = devCtx->SharedBuffer->DriverToPluginBufferSize;
-                 // Or alternatively, return an error:
-                 // devCtx->SharedBuffer->BufferState = BUFFER_STATE_ERROR; 
-                 // status = STATUS_BUFFER_OVERFLOW; 
-                 // break;
+                bytesToZero = devCtx->SharedBuffer->DriverToPluginBufferSize;
             }
-            
-            // Fill the driver-to-plugin buffer with silence
-            if (bytesToZero > 0) // Ensure bytesToZero is positive before calling RtlZeroMemory
-            {
+
+            if (bytesToZero > 0) {
                 RtlZeroMemory(driverToPluginBuffer, bytesToZero);
             }
-            
-            devCtx->SharedBuffer->ProcessedFrames += framesInThisBlock;
-            devCtx->SharedBuffer->BufferState = BUFFER_STATE_EMPTY; 
-
-            NTSTATUS eventStatus = ZwSetEvent(devCtx->CompletionEventHandle, NULL);
-            if (!NT_SUCCESS(eventStatus)) {
-                // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: TRIGGER - ZwSetEvent failed %!STATUS!\n", eventStatus));
-            }
-            
-            status = STATUS_SUCCESS;
-            information = 0;
         }
-        break;
 
-        case IOCTL_LAMA_CONNECT_GET_STATUS:
-        {
-            UNREFERENCED_PARAMETER(InputBufferLength);
-            PLAMA_CONNECT_SHARED_BUFFER outputBuffer = NULL;
-            size_t retrievedOutputBufferLength = 0;
+        devCtx->SharedBuffer->ProcessedFrames += framesInThisBlock;
+        devCtx->SharedBuffer->BufferState = BUFFER_STATE_EMPTY;
 
-            if (!devCtx->LamaClientRegistered) { status = STATUS_DEVICE_NOT_CONNECTED; break; }
-            if (!devCtx->SharedBuffer) { status = STATUS_INVALID_DEVICE_STATE; break; }
-
-            status = WdfRequestRetrieveOutputBuffer(Request, sizeof(LAMA_CONNECT_SHARED_BUFFER), (PVOID*)&outputBuffer, &retrievedOutputBufferLength);
-            if (!NT_SUCCESS(status)) {
-                // KdPrintEx for error, status is already set
-                break;
-            }
-            // WdfRequestRetrieveOutputBuffer with MinimumRequiredLength guarantees this, but defensive check is fine.
-            if (retrievedOutputBufferLength < sizeof(LAMA_CONNECT_SHARED_BUFFER)) { 
-                status = STATUS_BUFFER_TOO_SMALL; 
-                break; 
-            }
-
-            RtlCopyMemory(outputBuffer, devCtx->SharedBuffer, sizeof(LAMA_CONNECT_SHARED_BUFFER));
-            status = STATUS_SUCCESS;
-            information = sizeof(LAMA_CONNECT_SHARED_BUFFER);
+        NTSTATUS eventStatus = ZwSetEvent(devCtx->CompletionEventHandle, NULL);
+        if (!NT_SUCCESS(eventStatus)) {
+            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: TRIGGER - ZwSetEvent failed %!STATUS!\n", eventStatus));
         }
-        break;
 
-        case IOCTL_LAMA_CONNECT_RESET_STATS:
-        {
-            UNREFERENCED_PARAMETER(InputBufferLength);
-            UNREFERENCED_PARAMETER(OutputBufferLength);
+        status = STATUS_SUCCESS;
+        information = 0;
+    }
+    break;
 
-            if (!devCtx->LamaClientRegistered) { status = STATUS_DEVICE_NOT_CONNECTED; break; }
-            if (!devCtx->SharedBuffer) { status = STATUS_INVALID_DEVICE_STATE; break; }
+    case IOCTL_LAMA_CONNECT_GET_STATUS:
+    {
+        UNREFERENCED_PARAMETER(InputBufferLength);
+        PLAMA_CONNECT_SHARED_BUFFER outputBuffer = NULL;
+        size_t retrievedOutputBufferLength = 0;
 
-            devCtx->SharedBuffer->ProcessedFrames = 0;
-            devCtx->SharedBuffer->ErrorCount = 0;
-            devCtx->SharedBuffer->OverrunCount = 0;
-            devCtx->SharedBuffer->UnderrunCount = 0;
-            devCtx->SharedBuffer->AverageProcessingTimeUs = 0;
-            devCtx->SharedBuffer->PeakProcessingTimeUs = 0;
-            devCtx->SharedBuffer->LastProcessingTimeUs = 0; 
-            
-            status = STATUS_SUCCESS;
-            information = 0;
-        }
-        break;
+        if (!devCtx->LamaClientRegistered) { status = STATUS_DEVICE_NOT_CONNECTED; break; }
+        if (!devCtx->SharedBuffer) { status = STATUS_INVALID_DEVICE_STATE; break; }
 
-        default:
-            UNREFERENCED_PARAMETER(InputBufferLength); 
-            UNREFERENCED_PARAMETER(OutputBufferLength);
-            // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "LAMA: Codec_EvtIoDeviceControl received unknown IOCTL: 0x%X\n", IoControlCode));
-            status = STATUS_INVALID_DEVICE_REQUEST;
-            information = 0;
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(LAMA_CONNECT_SHARED_BUFFER), (PVOID*)&outputBuffer, &retrievedOutputBufferLength);
+        if (!NT_SUCCESS(status)) {
+            // KdPrintEx for error, status is already set
             break;
+        }
+        // WdfRequestRetrieveOutputBuffer with MinimumRequiredLength guarantees this, but defensive check is fine.
+        if (retrievedOutputBufferLength < sizeof(LAMA_CONNECT_SHARED_BUFFER)) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+
+        RtlCopyMemory(outputBuffer, devCtx->SharedBuffer, sizeof(LAMA_CONNECT_SHARED_BUFFER));
+        status = STATUS_SUCCESS;
+        information = sizeof(LAMA_CONNECT_SHARED_BUFFER);
+    }
+    break;
+
+    case IOCTL_LAMA_CONNECT_RESET_STATS:
+    {
+        UNREFERENCED_PARAMETER(InputBufferLength);
+        UNREFERENCED_PARAMETER(OutputBufferLength);
+
+        if (!devCtx->LamaClientRegistered) { status = STATUS_DEVICE_NOT_CONNECTED; break; }
+        if (!devCtx->SharedBuffer) { status = STATUS_INVALID_DEVICE_STATE; break; }
+
+        devCtx->SharedBuffer->ProcessedFrames = 0;
+        devCtx->SharedBuffer->ErrorCount = 0;
+        devCtx->SharedBuffer->OverrunCount = 0;
+        devCtx->SharedBuffer->UnderrunCount = 0;
+        devCtx->SharedBuffer->AverageProcessingTimeUs = 0;
+        devCtx->SharedBuffer->PeakProcessingTimeUs = 0;
+        devCtx->SharedBuffer->LastProcessingTimeUs = 0;
+
+        status = STATUS_SUCCESS;
+        information = 0;
+    }
+    break;
+
+    default:
+        UNREFERENCED_PARAMETER(InputBufferLength);
+        UNREFERENCED_PARAMETER(OutputBufferLength);
+        // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "LAMA: Codec_EvtIoDeviceControl received unknown IOCTL: 0x%X\n", IoControlCode));
+        status = STATUS_INVALID_DEVICE_REQUEST;
+        information = 0;
+        break;
     }
 
     WdfRequestCompleteWithInformation(Request, status, information);

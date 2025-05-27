@@ -32,13 +32,15 @@ Environment:
 #include "streamengine.tmh"
 #endif
 
+// Audio bridge functions are now declared in public.h
+
 _Use_decl_annotations_
 PAGED_CODE_SEG
 CStreamEngine::CStreamEngine(
     _In_ ACXSTREAM Stream,
     _In_ ACXDATAFORMAT StreamFormat,
     _In_ BOOL Offload,
-    _In_opt_ CSimPeakMeter *CircuitPeakmeter
+    _In_opt_ CSimPeakMeter* CircuitPeakmeter
 )
     : m_PacketsCount(0),
     m_PacketSize(0),
@@ -477,7 +479,7 @@ CStreamEngine::AssignDrmContentId(
 
     UNREFERENCED_PARAMETER(DrmContentId);
     UNREFERENCED_PARAMETER(DrmRights);
-    
+
     //
     // At this point the driver should enforce the new DrmRights.
     //
@@ -530,7 +532,7 @@ CStreamEngine::GetHWLatency(
 
 _Use_decl_annotations_
 PAGED_CODE_SEG
-CSimPeakMeter *
+CSimPeakMeter*
 CStreamEngine::GetPeakMeter()
 {
     PAGED_CODE();
@@ -688,7 +690,7 @@ CRenderStreamEngine::CRenderStreamEngine(
     _In_    ACXSTREAM       Stream,
     _In_    ACXDATAFORMAT   StreamFormat,
     _In_    BOOL            Offload,
-    _In_    CSimPeakMeter * CircuitPeakmeter
+    _In_    CSimPeakMeter* CircuitPeakmeter
 
 )
     : CStreamEngine(Stream, StreamFormat, Offload, CircuitPeakmeter)
@@ -701,6 +703,9 @@ PAGED_CODE_SEG
 CRenderStreamEngine::~CRenderStreamEngine()
 {
     PAGED_CODE();
+
+    // Unregister from audio bridge
+    UnregisterRenderEngine(this);
 }
 
 _Use_decl_annotations_
@@ -739,6 +744,9 @@ CRenderStreamEngine::PrepareHardware()
         goto exit;
     }
 
+    // Register with audio bridge
+    RegisterRenderEngine(this);
+
 exit:
     return status;
 }
@@ -749,6 +757,9 @@ NTSTATUS
 CRenderStreamEngine::ReleaseHardware()
 {
     PAGED_CODE();
+
+    // Unregister from audio bridge
+    UnregisterRenderEngine(this);
 
     m_SaveData.WaitAllWorkItems();
     m_SaveData.Cleanup();
@@ -762,7 +773,7 @@ NTSTATUS
 CRenderStreamEngine::AssignDrmContentId(
     ULONG          DrmContentId,
     PACXDRMRIGHTS  DrmRights
-    )
+)
 {
     PAGED_CODE();
 
@@ -776,7 +787,7 @@ CRenderStreamEngine::AssignDrmContentId(
     // HDMI render: if DigitalOutputDisable or CopyProtect is true, enable HDCP.
     // Loopback: if CopyProtect is true, disable loopback stream.
     //
-    
+
     //
     // Sample writes each stream seperately to disk. If the rights for this
     // stream indicates that the stream is CopyProtected, stop writing to disk.
@@ -864,6 +875,25 @@ CRenderStreamEngine::ProcessPacket()
         packetBuffer += m_FirstPacketOffset;
     }
 
+    // *** KEY CHANGE FOR AUDIO BRIDGE ***
+    // Extract audio format information
+    PWAVEFORMATEXTENSIBLE pwfext = (PWAVEFORMATEXTENSIBLE)AcxDataFormatGetWaveFormatExtensible(m_StreamFormat);
+    if (pwfext != nullptr)
+    {
+        ULONG sampleRate = pwfext->Format.nSamplesPerSec;
+        ULONG channels = pwfext->Format.nChannels;
+        ULONG frameSize = pwfext->Format.nBlockAlign;
+        ULONG frames = m_PacketSize / frameSize;
+        ULONG bitsPerSample = pwfext->Format.wBitsPerSample;
+
+        // Send to bridge with format information for proper conversion
+        if (frameSize > 0 && frames > 0) // Basic validation
+        {
+            SetWindowsAudioData(packetBuffer, frames, channels, sampleRate, bitsPerSample);
+        }
+    }
+
+    // Continue with original functionality (save to disk if enabled)
     m_SaveData.WriteData(packetBuffer, m_PacketSize);
 }
 
@@ -891,6 +921,9 @@ PAGED_CODE_SEG
 CCaptureStreamEngine::~CCaptureStreamEngine()
 {
     PAGED_CODE();
+
+    // Unregister from audio bridge
+    UnregisterCaptureEngine(this);
 
     RtlFreeUnicodeString(&m_HostCaptureFileName);
     RtlFreeUnicodeString(&m_LoopbackCaptureFileName);
@@ -937,6 +970,9 @@ CCaptureStreamEngine::PrepareHardware()
         status = m_ToneGenerator.Init(m_ToneFrequency, pwfext);
     }
 
+    // Register with audio bridge
+    RegisterCaptureEngine(this);
+
 exit:
     return status;
 }
@@ -947,6 +983,9 @@ NTSTATUS
 CCaptureStreamEngine::ReleaseHardware()
 {
     PAGED_CODE();
+
+    // Unregister from audio bridge
+    UnregisterCaptureEngine(this);
 
     if (m_EnableWaveCapture)
     {
@@ -1000,13 +1039,38 @@ CCaptureStreamEngine::ProcessPacket()
         packetBuffer += m_FirstPacketOffset;
     }
 
-    if (m_EnableWaveCapture)
+    // *** KEY CHANGE FOR AUDIO BRIDGE ***
+    // First try to get audio from plugin via bridge
+    BOOLEAN gotPluginAudio = FALSE;
+
+    // Extract audio format information
+    PWAVEFORMATEXTENSIBLE pwfext = (PWAVEFORMATEXTENSIBLE)AcxDataFormatGetWaveFormatExtensible(m_StreamFormat);
+    if (pwfext != nullptr)
     {
-        m_WaveReader.ReadWaveData(packetBuffer, m_PacketSize);
+        ULONG sampleRate = pwfext->Format.nSamplesPerSec;
+        ULONG channels = pwfext->Format.nChannels;
+        ULONG frameSize = pwfext->Format.nBlockAlign;
+        ULONG frames = m_PacketSize / frameSize;
+        ULONG bitsPerSample = pwfext->Format.wBitsPerSample;
+
+        // Try to get audio from plugin with format conversion
+        if (frameSize > 0 && frames > 0) // Basic validation
+        {
+            gotPluginAudio = GetPluginAudioData(packetBuffer, frames, channels, sampleRate, bitsPerSample);
+        }
     }
-    else
+
+    // If no plugin audio available, fall back to original logic
+    if (!gotPluginAudio)
     {
-        m_ToneGenerator.GenerateSine(packetBuffer, m_PacketSize);
+        if (m_EnableWaveCapture)
+        {
+            m_WaveReader.ReadWaveData(packetBuffer, m_PacketSize);
+        }
+        else
+        {
+            m_ToneGenerator.GenerateSine(packetBuffer, m_PacketSize);
+        }
     }
 }
 
@@ -1031,11 +1095,11 @@ CCaptureStreamEngine::ReadRegistrySettings()
 
     DriverObject = WdfDriverWdmGetDriverObject(WdfGetDriver());
     DriverKey = NULL;
-    status = IoOpenDriverRegistryKey(DriverObject, 
-                                 DriverRegKeyParameters,
-                                 KEY_READ,
-                                 0,
-                                 &DriverKey);
+    status = IoOpenDriverRegistryKey(DriverObject,
+        DriverRegKeyParameters,
+        KEY_READ,
+        0,
+        &DriverKey);
 
     if (!NT_SUCCESS(status))
     {
@@ -1044,10 +1108,10 @@ CCaptureStreamEngine::ReadRegistrySettings()
     }
 
     status = RtlQueryRegistryValues(RTL_REGISTRY_HANDLE,
-                                  (PCWSTR) DriverKey,
-                                  &paramTable[0],
-                                  NULL,
-                                  NULL);
+        (PCWSTR)DriverKey,
+        &paramTable[0],
+        NULL,
+        NULL);
 
     if (DriverKey)
     {
@@ -1293,7 +1357,7 @@ EvtStreamAssignDrmContentId(
 )
 {
     PSTREAMENGINE_CONTEXT ctx;
-    CStreamEngine * streamEngine = NULL;
+    CStreamEngine* streamEngine = NULL;
 
     PAGED_CODE();
 
@@ -1342,4 +1406,3 @@ EvtStreamGetPresentationPosition(
 
     return streamEngine->GetPresentationPosition(PositionInBlocks, QPCPosition);
 }
-
