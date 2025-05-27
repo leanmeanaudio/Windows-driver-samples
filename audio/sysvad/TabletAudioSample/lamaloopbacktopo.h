@@ -6,8 +6,17 @@
 
 #include <portcls.h>
 #include <ksmedia.h>
-#include "sysvad.h" // For MINIFILTER_DESCRIPTOR, PHYSICALCONNECTIONTABLE, etc. (assuming it's defined here or in included headers)
-#include "endpointscommon.h" // For KSNODETYPE_SUM, etc. (assuming common node types are here)
+#include "sysvad.h" // For MINIFILTER_DESCRIPTOR, PHYSICALCONNECTIONTABLE, etc.
+
+// Replace "endpointscommon.h" with direct include to fix path issues
+#include "..\EndpointsCommon\basetopo.h" // For node types and miniport topology functions
+
+// Pin definitions for topology miniport
+#define KSPIN_TOPO_WAVEIN_SOURCE      0       // from wave filter
+#define KSPIN_TOPO_BRIDGE             1       // to wave filter
+
+// Node definitions for topology miniport
+#define KSNODE_TOPO_SUM               0       // Sum node
 
 //=============================================================================
 // Defines

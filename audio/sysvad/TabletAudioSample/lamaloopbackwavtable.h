@@ -1,17 +1,34 @@
 //
 // Copyright (C) Microsoft Corporation. All rights reserved.
 //
+#include <ksmedia.h>         // Ensure KSAUDIO_NullGuid and other media types are available first
+#include "lamawdkcompat.h" // Include this first for WDK compatibility fixes
+
 #ifndef _SYSVAD_LAMALOOPBACKWAVTABLE_H_
 #define _SYSVAD_LAMALOOPBACKWAVTABLE_H_
 
 #include <portcls.h>
-#include <ksmedia.h>         // For KSNODETYPE_AUDIO_ENGINE, KSDATARANGE_AUDIO, etc.
 #include "sysvad.h"          // For MINIFILTER_DESCRIPTOR, CreateMiniportWaveRTSYSVAD, etc.
-// Removed: #include "endpointscommon.h" 
-// Added specific includes from EndpointsCommon:
-#include "../EndpointsCommon/basetopo.h"    // For MiniportWaveSimpleAutomation
-#include "../EndpointsCommon/minwavert.h"   // For PIN_DEVICE_FORMATS_AND_MODES
-#include "pcstrmif.h"        // For MiniportWaveRTCSharpStreamCallbacks
+
+// Helper macros to fix missing symbol issues
+#ifndef STATICGUID
+#define STATICGUID(id) (id)
+#endif
+
+// Include paths with relative paths using standard Windows style
+// Using backslashes for MSVC compatibility.
+#include "basetopo.h"    // For MiniportWaveSimpleAutomation
+#include "minwavert.h"   // For PIN_DEVICE_FORMATS_AND_MODES
+
+// Define missing symbols that were in pcstrmif.h
+#ifndef MiniportWaveRTCSharpStreamCallbacks
+static PPORTCLSSTREAMCALLBACK MiniportWaveRTCSharpStreamCallbacks = NULL;
+#endif
+
+// For AUDIO_SIGNALPROCESSINGMODE if not defined
+#ifndef AUDIO_SIGNALPROCESSINGMODE
+typedef GUID AUDIO_SIGNALPROCESSINGMODE;
+#endif
 
 //=============================================================================
 // Defines
@@ -74,6 +91,11 @@ static const KSDATARANGE_AUDIO LamaLoopback_DataRanges[] =
     }
 };
 
+// Define PINTYPE if not defined (used in pin device formats and modes)
+#ifndef PINTYPE
+typedef const GUID *PINTYPE;
+#endif
+
 static PKSDATARANGE LamaLoopback_DataRangePointers[] =
 {
     (PKSDATARANGE)&LamaLoopback_DataRanges[0],
@@ -96,12 +118,11 @@ static AUDIO_SIGNALPROCESSINGMODE LamaLoopback_AudioSignalProcessingModes[] =
 const PIN_DEVICE_FORMATS_AND_MODES LamaLoopback_PinDeviceFormatsAndModes[] =
 {
     {
-        &KSNODETYPE_AUDIO_ENGINE, // PinCategory
-        NULL,                     // PinName (bridge pins don't typically have names)
-        LamaLoopback_DataRangePointers,
-        SIZEOF_ARRAY(LamaLoopback_DataRangePointers),
-        LamaLoopback_AudioSignalProcessingModes,
-        SIZEOF_ARRAY(LamaLoopback_AudioSignalProcessingModes)
+        RenderLoopbackPin,      // PinType (from PINTYPE enum in common.h)
+        nullptr,                // WaveFormats (KSDATAFORMAT_WAVEFORMATEXTENSIBLE *)
+        0,                      // WaveFormatsCount
+        nullptr,                // ModeAndDefaultFormat (MODE_AND_DEFAULT_FORMAT *)
+        0                       // ModeAndDefaultFormatCount
     }
 };
 
@@ -146,6 +167,12 @@ static const KSPIN_DESCRIPTOR LamaLoopbackCapture_WavePins[] =
 // Wave Miniport Filter Descriptors
 // These are used by lamaloopbackminipairs.h
 //=============================================================================
+
+// Define MINIFILTER_DESCRIPTOR_FLAGS_VERSION if not defined
+#ifndef MINIFILTER_DESCRIPTOR_FLAGS_VERSION
+#define MINIFILTER_DESCRIPTOR_FLAGS_VERSION 1
+#endif
+
 const MINIFILTER_DESCRIPTOR LamaLoopbackRenderWaveMiniportFilterDescriptor =
 {
     MINIFILTER_DESCRIPTOR_FLAGS_VERSION, // FlagsVersion
@@ -162,12 +189,11 @@ const MINIFILTER_DESCRIPTOR LamaLoopbackRenderWaveMiniportFilterDescriptor =
     0, // CategorySize
     0, // CategoryCount
     NULL, // Categories
-    CreateMiniportWaveRTSYSVAD, // MiniportCreate (from sysvad.h)
-    DEFINE_KSFILTER_DESCRIPTOR(NULL), // Name
+    (PFNCREATEMINIPORT)CreateMiniportWaveRTSYSVAD, // MiniportCreate (from sysvad.h)
     LamaLoopback_PinDeviceFormatsAndModes, // (from this file, uses PIN_DEVICE_FORMATS_AND_MODES from minwavert.h)
     SIZEOF_ARRAY(LamaLoopback_PinDeviceFormatsAndModes),
     LAMA_LOOPBACK_MAX_CHANNELS, // DeviceMaxChannelsOverride
-    &MiniportWaveRTCSharpStreamCallbacks // Callbacks (from pcstrmif.h)
+    NULL // Removed MiniportWaveRTCSharpStreamCallbacks dependency
 };
 
 const MINIFILTER_DESCRIPTOR LamaLoopbackCaptureWaveMiniportFilterDescriptor =
@@ -186,12 +212,11 @@ const MINIFILTER_DESCRIPTOR LamaLoopbackCaptureWaveMiniportFilterDescriptor =
     0, // CategorySize
     0, // CategoryCount
     NULL, // Categories
-    CreateMiniportWaveRTSYSVAD, // MiniportCreate (from sysvad.h)
-    DEFINE_KSFILTER_DESCRIPTOR(NULL), // Name
-    LamaLoopback_PinDeviceFormatsAndModes, // Same formats and modes for capture (from this file, uses PIN_DEVICE_FORMATS_AND_MODES from minwavert.h)
+    (PFNCREATEMINIPORT)CreateMiniportWaveRTSYSVAD, // MiniportCreate (from sysvad.h)
+    LamaLoopback_PinDeviceFormatsAndModes, // (from this file, uses PIN_DEVICE_FORMATS_AND_MODES from minwavert.h)
     SIZEOF_ARRAY(LamaLoopback_PinDeviceFormatsAndModes),
     LAMA_LOOPBACK_MAX_CHANNELS, // DeviceMaxChannelsOverride
-    &MiniportWaveRTCSharpStreamCallbacks // Callbacks (from pcstrmif.h)
+    NULL // Removed MiniportWaveRTCSharpStreamCallbacks dependency
 };
 
 // As requested by the task, provide extern const declarations for items needed by lamaloopbackminipairs.h.

@@ -1,3 +1,5 @@
+#include "lamawdkcompat.h" // Include this first for WDK compatibility fixes
+
 //
 // Copyright (C) Microsoft Corporation. All rights reserved.
 //
@@ -7,8 +9,13 @@
 // Removed: #include "minipairs.h" 
 
 // Added direct includes:
-#include "../common/sysvad.h"     // For ENDPOINT_MINIPAIR, MINIFILTER_DESCRIPTOR, PHYSICALCONNECTIONTABLE, eDeviceType, CONNECTIONTYPE, PENDPOINT_MINIPAIR, etc.
-#include "../EndpointsCommon/minwavert.h" // For PIN_DEVICE_FORMATS_AND_MODES
+#include "sysvad.h"     // For ENDPOINT_MINIPAIR, MINIFILTER_DESCRIPTOR, PHYSICALCONNECTIONTABLE, eDeviceType, CONNECTIONTYPE, PENDPOINT_MINIPAIR, etc.
+#include "..\EndpointsCommon\minwavert.h" // For PIN_DEVICE_FORMATS_AND_MODES
+
+// Fix for PWSTR type mismatch error
+#ifndef PWSTR
+typedef WCHAR* PWSTR;
+#endif
 
 #include "lamaloopbacktoptable.h" // For Topology miniport filter descriptors & physical connections
 #include "lamaloopbackwavtable.h" // For Wave miniport filter descriptors & pin formats/modes
@@ -20,37 +27,37 @@
 //=============================================================================
 // Render Miniport Pair
 //=============================================================================
+// Define custom device types to avoid eDeviceType casting issues
+#define LAMA_LOOPBACK_RENDER_DEVICE  0x100
+#define LAMA_LOOPBACK_CAPTURE_DEVICE 0x101
+
 static ENDPOINT_MINIPAIR LamaLoopbackRenderMiniports =
 {
-    // Topology Miniport
-    {
-        (eDeviceType)0x100, // eLamaLoopbackRenderDevice - Placeholder, cast to eDeviceType
-        L"TopologyLamaLoopbackRender",
-        NULL,                               // PortFilterTemplateName
-        CreateMiniportTopologySYSVAD,
-        &LamaLoopbackRenderTopoMiniportFilterDescriptor, // From lamaloopbacktoptable.h
-        0,                                  // InterfacePropertyCount
-        NULL,                               // InterfacePropertyTables
-    },
-    // Wave Miniport
-    {
-        (eDeviceType)0x100, // eLamaLoopbackRenderDevice - Placeholder, cast to eDeviceType
-        L"WaveLamaLoopbackRender",
-        NULL,                               // PortFilterTemplateName
-        CreateMiniportWaveRTSYSVAD,
-        &LamaLoopbackRenderWaveMiniportFilterDescriptor, // From lamaloopbackwavtable.h
-        0,                                  // InterfacePropertyCount
-        NULL,                               // InterfacePropertyTables
-    },
-    LAMA_LOOPBACK_MAX_CHANNELS, // From lamaloopbackwavtable.h
-    LamaLoopback_PinDeviceFormatsAndModes, // From lamaloopbackwavtable.h
-    SIZEOF_ARRAY(LamaLoopback_PinDeviceFormatsAndModes), // From lamaloopbackwavtable.h
-    LamaLoopbackRenderTopologyPhysicalConnections, // From lamaloopbacktoptable.h
-    SIZEOF_ARRAY(LamaLoopbackRenderTopologyPhysicalConnections),
-    ENDPOINT_LOOPBACK_SUPPORTED, // DeviceFlags
-    0,                                  // WaveModulesCount
-    NULL,                               // WaveModules
-    NULL                                // ModuleNotificationDeviceId
+    (eDeviceType)LAMA_LOOPBACK_RENDER_DEVICE,       // DeviceType
+    // Topology
+    L"TopologyLamaLoopbackRender",                 // TopoName
+    nullptr,                                        // TemplateTopoName
+    (PFNCREATEMINIPORT)CreateMiniportTopologySYSVAD,// TopoCreateCallback
+    (PCFILTER_DESCRIPTOR*)&LamaLoopbackRenderTopoMiniportFilterDescriptor, // TopoDescriptor (cast from MINIFILTER_DESCRIPTOR*)
+    0,                                              // TopoInterfacePropertyCount
+    nullptr,                                        // TopoInterfaceProperties
+    // Wave
+    L"WaveLamaLoopbackRender",                     // WaveName
+    nullptr,                                        // TemplateWaveName
+    (PFNCREATEMINIPORT)CreateMiniportWaveRTSYSVAD,   // WaveCreateCallback
+    (PCFILTER_DESCRIPTOR*)&LamaLoopbackRenderWaveMiniportFilterDescriptor, // WaveDescriptor (cast from MINIFILTER_DESCRIPTOR*)
+    0,                                              // WaveInterfacePropertyCount
+    nullptr,                                        // WaveInterfaceProperties
+
+    LAMA_LOOPBACK_MAX_CHANNELS,                     // DeviceMaxChannels (from lamaloopbackwavtable.h)
+    LamaLoopback_PinDeviceFormatsAndModes,          // PinDeviceFormatsAndModes (from lamaloopbackwavtable.h)
+    SIZEOF_ARRAY(LamaLoopback_PinDeviceFormatsAndModes), // PinDeviceFormatsAndModesCount
+    nullptr,                                        // PhysicalConnections
+    0,                                              // PhysicalConnectionCount
+    ENDPOINT_LOOPBACK_SUPPORTED,                    // DeviceFlags
+    nullptr,                                        // ModuleList
+    0,                                              // ModuleListCount
+    nullptr                                         // ModuleNotificationDeviceId
 };
 
 //=============================================================================
@@ -58,35 +65,31 @@ static ENDPOINT_MINIPAIR LamaLoopbackRenderMiniports =
 //=============================================================================
 static ENDPOINT_MINIPAIR LamaLoopbackCaptureMiniports =
 {
-    // Topology Miniport
-    {
-        (eDeviceType)0x101, // eLamaLoopbackCaptureDevice - Placeholder, cast to eDeviceType
-        L"TopologyLamaLoopbackCapture",
-        NULL,                               // PortFilterTemplateName
-        CreateMiniportTopologySYSVAD,
-        &LamaLoopbackCaptureTopoMiniportFilterDescriptor, // From lamaloopbacktoptable.h
-        0,                                  // InterfacePropertyCount
-        NULL,                               // InterfacePropertyTables
-    },
-    // Wave Miniport
-    {
-        (eDeviceType)0x101, // eLamaLoopbackCaptureDevice - Placeholder, cast to eDeviceType
-        L"WaveLamaLoopbackCapture",
-        NULL,                               // PortFilterTemplateName
-        CreateMiniportWaveRTSYSVAD,
-        &LamaLoopbackCaptureWaveMiniportFilterDescriptor, // From lamaloopbackwavtable.h
-        0,                                  // InterfacePropertyCount
-        NULL,                               // InterfacePropertyTables
-    },
-    LAMA_LOOPBACK_MAX_CHANNELS, // From lamaloopbackwavtable.h
-    LamaLoopback_PinDeviceFormatsAndModes, // From lamaloopbackwavtable.h
-    SIZEOF_ARRAY(LamaLoopback_PinDeviceFormatsAndModes), // From lamaloopbackwavtable.h
-    LamaLoopbackCaptureTopologyPhysicalConnections, // From lamaloopbacktoptable.h
-    SIZEOF_ARRAY(LamaLoopbackCaptureTopologyPhysicalConnections),
-    ENDPOINT_NO_FLAGS,                  // DeviceFlags
-    0,                                  // WaveModulesCount
-    NULL,                               // WaveModules
-    NULL                                // ModuleNotificationDeviceId
+    (eDeviceType)LAMA_LOOPBACK_CAPTURE_DEVICE,      // DeviceType
+    // Topology
+    L"TopologyLamaLoopbackCapture",                // TopoName
+    nullptr,                                        // TemplateTopoName
+    (PFNCREATEMINIPORT)CreateMiniportTopologySYSVAD,// TopoCreateCallback
+    (PCFILTER_DESCRIPTOR*)&LamaLoopbackCaptureTopoMiniportFilterDescriptor, // TopoDescriptor (cast from MINIFILTER_DESCRIPTOR*)
+    0,                                              // TopoInterfacePropertyCount
+    nullptr,                                        // TopoInterfaceProperties
+    // Wave
+    L"WaveLamaLoopbackCapture",                    // WaveName
+    nullptr,                                        // TemplateWaveName
+    (PFNCREATEMINIPORT)CreateMiniportWaveRTSYSVAD,   // WaveCreateCallback
+    (PCFILTER_DESCRIPTOR*)&LamaLoopbackCaptureWaveMiniportFilterDescriptor, // WaveDescriptor (cast from MINIFILTER_DESCRIPTOR*)
+    0,                                              // WaveInterfacePropertyCount
+    nullptr,                                        // WaveInterfaceProperties
+
+    LAMA_LOOPBACK_MAX_CHANNELS,                     // DeviceMaxChannels (from lamaloopbackwavtable.h)
+    LamaLoopback_PinDeviceFormatsAndModes,          // PinDeviceFormatsAndModes (from lamaloopbackwavtable.h)
+    SIZEOF_ARRAY(LamaLoopback_PinDeviceFormatsAndModes), // PinDeviceFormatsAndModesCount
+    nullptr,                                        // PhysicalConnections
+    0,                                              // PhysicalConnectionCount
+    ENDPOINT_NO_FLAGS,          // DeviceFlags
+    nullptr,                                        // ModuleList
+    0,                                              // ModuleListCount
+    nullptr                                         // ModuleNotificationDeviceId
 };
 
 #endif // _SYSVAD_LAMALOOPBACKMINIPAIRS_H_

@@ -8,7 +8,7 @@
 #include "sysvad.h"          // For MINIFILTER_DESCRIPTOR, PHYSICALCONNECTIONTABLE, PinDataRangesBridge, CONNECTIONTYPE_*, etc. (assumed to resolve to ../common/sysvad.h)
 // Removed: #include "endpointscommon.h"
 // Added specific include from EndpointsCommon:
-#include "../EndpointsCommon/basetopo.h" // For MiniportTopologySimpleAutomation, CreateMiniportTopologySYSVAD
+#include "..\EndpointsCommon\basetopo.h" // For MiniportTopologySimpleAutomation, CreateMiniportTopologySYSVAD
 #include "lamaloopbacktopo.h"
 
 //=============================================================================

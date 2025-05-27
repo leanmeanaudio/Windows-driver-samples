@@ -10,13 +10,15 @@
 //
 // Forward declare the Topology Miniport Filter Descriptors defined in lamaloopbacktopo.cpp
 //
-extern const MINIFILTER_DESCRIPTOR LamaLoopbackRenderTopoMiniportFilterDescriptor;
-extern const MINIFILTER_DESCRIPTOR LamaLoopbackCaptureTopoMiniportFilterDescriptor;
+// Make sure we have struct keyword before the type to avoid missing semicolon errors
+extern const struct _MINIFILTER_DESCRIPTOR LamaLoopbackRenderTopoMiniportFilterDescriptor;
+extern const struct _MINIFILTER_DESCRIPTOR LamaLoopbackCaptureTopoMiniportFilterDescriptor;
 
 //
 // Forward declare the Physical Connection Tables defined in lamaloopbacktopo.cpp
 //
-extern const PHYSICALCONNECTIONTABLE LamaLoopbackRenderTopologyPhysicalConnections[];
-extern const PHYSICALCONNECTIONTABLE LamaLoopbackCaptureTopologyPhysicalConnections[];
+// Use struct to avoid incomplete type errors
+extern const struct _PHYSICALCONNECTIONTABLE LamaLoopbackRenderTopologyPhysicalConnections[];
+extern const struct _PHYSICALCONNECTIONTABLE LamaLoopbackCaptureTopologyPhysicalConnections[];
 
 #endif // _SYSVAD_LAMALOOPBACKTOPTABLE_H_
