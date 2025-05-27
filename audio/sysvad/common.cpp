@@ -2588,6 +2588,72 @@ CAdapterCommon::InstallEndpointFilters
         if (NT_SUCCESS(ntStatus))
         {
             ntStatus = CacheSubdevice(MiniportPair->WaveName, unknownWave, unknownMiniWave);
+
+            // Create custom symbolic links for LAMA Loopback wave miniports.
+            // This is done after the wave miniport is successfully installed and cached.
+            if (NT_SUCCESS(ntStatus) && MiniportPair->WaveName != NULL)
+            {
+                UNICODE_STRING targetNameUnicode;
+                UNICODE_STRING symbolicLinkNameUnicode;
+                NTSTATUS statusSymLink = STATUS_UNSUCCESSFUL; // Renamed to avoid conflict with outer ntStatus
+                WCHAR targetNameBuffer[MAX_PATH]; 
+
+                // Check for LamaLoopbackRender Wave miniport
+                if (wcscmp(MiniportPair->WaveName, L"WaveLamaLoopbackRender") == 0)
+                {
+                    // Construct target name: \Device\WaveLamaLoopbackRender
+                    statusSymLink = RtlStringCchPrintfW(targetNameBuffer, MAX_PATH, L"\\Device\\%s", MiniportPair->WaveName);
+                    if (NT_SUCCESS(statusSymLink))
+                    {
+                        RtlInitUnicodeString(&targetNameUnicode, targetNameBuffer);
+                        RtlInitUnicodeString(&symbolicLinkNameUnicode, L"\\DosDevices\\LamaLoopbackRender0");
+                        
+                        statusSymLink = IoCreateSymbolicLink(&symbolicLinkNameUnicode, &targetNameUnicode);
+                        if (NT_SUCCESS(statusSymLink))
+                        {
+                            DPF(D_TERSE, ("Successfully created symbolic link %wZ -> %wZ", &symbolicLinkNameUnicode, &targetNameUnicode));
+                            // TODO: Add logic to delete this symbolic link (LamaLoopbackRender0) during PnP remove/stop.
+                        }
+                        else
+                        {
+                            DPF(D_ERROR, ("Failed to create symbolic link %wZ for %wZ, status 0x%08X", &symbolicLinkNameUnicode, &targetNameUnicode, statusSymLink));
+                        }
+                    }
+                    else
+                    {
+                        DPF(D_ERROR, ("Failed to construct target name for %S, status 0x%08X", MiniportPair->WaveName, statusSymLink));
+                    }
+                }
+                // Check for LamaLoopbackCapture Wave miniport
+                else if (wcscmp(MiniportPair->WaveName, L"WaveLamaLoopbackCapture") == 0)
+                {
+                    // Construct target name: \Device\WaveLamaLoopbackCapture
+                    statusSymLink = RtlStringCchPrintfW(targetNameBuffer, MAX_PATH, L"\\Device\\%s", MiniportPair->WaveName);
+                    if (NT_SUCCESS(statusSymLink))
+                    {
+                        RtlInitUnicodeString(&targetNameUnicode, targetNameBuffer);
+                        RtlInitUnicodeString(&symbolicLinkNameUnicode, L"\\DosDevices\\LamaLoopbackCapture0");
+
+                        statusSymLink = IoCreateSymbolicLink(&symbolicLinkNameUnicode, &targetNameUnicode);
+                        if (NT_SUCCESS(statusSymLink))
+                        {
+                            DPF(D_TERSE, ("Successfully created symbolic link %wZ -> %wZ", &symbolicLinkNameUnicode, &targetNameUnicode));
+                            // TODO: Add logic to delete this symbolic link (LamaLoopbackCapture0) during PnP remove/stop.
+                        }
+                        else
+                        {
+                            DPF(D_ERROR, ("Failed to create symbolic link %wZ for %wZ, status 0x%08X", &symbolicLinkNameUnicode, &targetNameUnicode, statusSymLink));
+                        }
+                    }
+                    else
+                    {
+                        DPF(D_ERROR, ("Failed to construct target name for %S, status 0x%08X", MiniportPair->WaveName, statusSymLink));
+                    }
+                }
+                // Note: The overall ntStatus of InstallEndpointFilters should reflect the success/failure 
+                // of subdevice installation (from the outer ntStatus), not necessarily the symbolic link creation.
+                // The symbolic link creation status (statusSymLink) is logged but does not override the main ntStatus.
+            }
         }
     }
 
@@ -5111,4 +5177,3 @@ CAdapterCommon::NotifyEndpointPair
 
     return ntStatus;
 }
-

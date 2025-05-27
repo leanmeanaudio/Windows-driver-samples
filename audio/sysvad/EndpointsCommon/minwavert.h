@@ -22,6 +22,9 @@ Abstract:
 #include "usbhsmicwavtable.h"
 #endif // SYSVAD_USB_SIDEBAND
 
+// Define for LAMA Loopback shared buffer size
+#define LAMA_LOOPBACK_SHARED_BUFFER_SIZE (0x10000) // 64KB
+
 //=============================================================================
 // Referenced Forward
 //=============================================================================
@@ -186,6 +189,14 @@ protected:
     PPORTCLSNOTIFICATIONS               m_pPortClsNotifications;
     PENDPOINT_MINIPAIR                  m_pMiniportPair;
 
+    // Static members for LAMA Loopback
+    static BYTE*                        g_LamaLoopbackBuffer;
+    static ULONG                        g_LamaLoopbackBufferPosition;
+    static ULONG                        g_LamaLoopbackBytesAvailable;
+    static KSPIN_LOCK                   g_LamaLoopbackSpinLock;
+    static BOOL                         g_LamaLoopbackBufferInitialized;
+    static LONG                         g_LamaLoopbackClientCount; 
+    static KSPIN_LOCK                   g_LamaLoopbackInitLock;
 
 public:
     DECLARE_PROPERTYHANDLER(Get_SoundDetectorSupportedPatterns);
@@ -441,6 +452,11 @@ public:
     {
         return m_pAdapterCommon; 
     };
+
+    // Helper methods for LAMA Loopback
+    BOOL IsLamaLoopbackRender() const;
+    BOOL IsLamaLoopbackCapture() const;
+
 #pragma code_seg()
 
 #ifdef SYSVAD_BTH_BYPASS
@@ -738,4 +754,3 @@ public:
 typedef CMiniportWaveRT *PCMiniportWaveRT;
 
 #endif // _SYSVAD_MINWAVERT_H_
-

@@ -29,6 +29,19 @@ Abstract:
 #define EFFECTS_LIST_COUNT 2
 
 //=============================================================================
+// Static definitions for LAMA Loopback
+//=============================================================================
+BYTE*       CMiniportWaveRT::g_LamaLoopbackBuffer = NULL;
+ULONG       CMiniportWaveRT::g_LamaLoopbackBufferPosition = 0;
+ULONG       CMiniportWaveRT::g_LamaLoopbackBytesAvailable = 0;
+KSPIN_LOCK  CMiniportWaveRT::g_LamaLoopbackSpinLock; // Initialized in Init
+BOOL        CMiniportWaveRT::g_LamaLoopbackBufferInitialized = FALSE;
+LONG        CMiniportWaveRT::g_LamaLoopbackClientCount = 0;
+KSPIN_LOCK  CMiniportWaveRT::g_LamaLoopbackInitLock;  // Initialized once
+BOOL        CMiniportWaveRT::g_LamaLoopbackInitLockInitialized = FALSE;
+
+
+//=============================================================================
 // CMiniportWaveRT
 //=============================================================================
 
@@ -121,6 +134,32 @@ Return Value:
 
     DPF_ENTER(("[CMiniportWaveRT::~CMiniportWaveRT]"));
 
+    // Deinitialize and free LAMA Loopback buffer if this is the last LAMA client
+    if (IsLamaLoopbackRender() || IsLamaLoopbackCapture())
+    {
+        if (CMiniportWaveRT::g_LamaLoopbackInitLockInitialized) // Ensure init lock was initialized
+        {
+            KIRQL oldIrql;
+            KeAcquireSpinLock(&CMiniportWaveRT::g_LamaLoopbackInitLock, &oldIrql);
+            
+            InterlockedDecrement(&CMiniportWaveRT::g_LamaLoopbackClientCount);
+            if (CMiniportWaveRT::g_LamaLoopbackClientCount == 0 && CMiniportWaveRT::g_LamaLoopbackBufferInitialized)
+            {
+                if (CMiniportWaveRT::g_LamaLoopbackBuffer)
+                {
+                    ExFreePoolWithTag(CMiniportWaveRT::g_LamaLoopbackBuffer, MINWAVERT_POOLTAG);
+                    CMiniportWaveRT::g_LamaLoopbackBuffer = NULL;
+                }
+                CMiniportWaveRT::g_LamaLoopbackBufferInitialized = FALSE;
+                // Note: Spinlocks (g_LamaLoopbackSpinLock) don't have an explicit deinit function.
+                // g_LamaLoopbackInitLock also remains initialized for the lifetime of the driver.
+                DPF(D_TERSE, ("LAMA Loopback buffer deallocated."));
+            }
+            KeReleaseSpinLock(&CMiniportWaveRT::g_LamaLoopbackInitLock, oldIrql);
+        }
+    }
+
+
     if (m_pDeviceFormat)
     {
         ExFreePoolWithTag( m_pDeviceFormat, MINWAVERT_POOLTAG );
@@ -196,8 +235,11 @@ Return Value:
 #if defined(SYSVAD_BTH_BYPASS) || defined(SYSVAD_USB_SIDEBAND)
     if (IsSidebandDevice())
     {
-        m_pSidebandDevice->SetFormatChangeHandler(m_DeviceType, NULL, NULL);
-        SAFE_RELEASE(m_pSidebandDevice);
+        if (m_pSidebandDevice) // Make sure m_pSidebandDevice is not NULL
+        {
+            m_pSidebandDevice->SetFormatChangeHandler(m_DeviceType, NULL, NULL);
+            SAFE_RELEASE(m_pSidebandDevice);
+        }
     }
 #endif // defined(SYSVAD_BTH_BYPASS) || defined(SYSVAD_USB_SIDEBAND)
 
@@ -384,6 +426,47 @@ Return Value:
 
     NTSTATUS ntStatus = STATUS_SUCCESS;
     size_t   size;
+
+    // Initialize LAMA Loopback static init lock (first time only for the entire driver)
+    if (!CMiniportWaveRT::g_LamaLoopbackInitLockInitialized)
+    {
+        KeInitializeSpinLock(&CMiniportWaveRT::g_LamaLoopbackInitLock);
+        CMiniportWaveRT::g_LamaLoopbackInitLockInitialized = TRUE;
+    }
+    
+    // Initialize LAMA Loopback buffer if this is a LAMA client
+    if (IsLamaLoopbackRender() || IsLamaLoopbackCapture())
+    {
+        KIRQL oldIrql;
+        KeAcquireSpinLock(&CMiniportWaveRT::g_LamaLoopbackInitLock, &oldIrql);
+        
+        InterlockedIncrement(&CMiniportWaveRT::g_LamaLoopbackClientCount);
+        if (CMiniportWaveRT::g_LamaLoopbackClientCount == 1 && !CMiniportWaveRT::g_LamaLoopbackBufferInitialized)
+        {
+            CMiniportWaveRT::g_LamaLoopbackBuffer = (BYTE*)ExAllocatePool2(POOL_FLAG_NON_PAGED, LAMA_LOOPBACK_SHARED_BUFFER_SIZE, MINWAVERT_POOLTAG);
+            if (CMiniportWaveRT::g_LamaLoopbackBuffer)
+            {
+                KeInitializeSpinLock(&CMiniportWaveRT::g_LamaLoopbackSpinLock);
+                CMiniportWaveRT::g_LamaLoopbackBufferPosition = 0;
+                CMiniportWaveRT::g_LamaLoopbackBytesAvailable = 0;
+                CMiniportWaveRT::g_LamaLoopbackBufferInitialized = TRUE;
+                DPF(D_TERSE, ("LAMA Loopback buffer allocated. Size: %u", LAMA_LOOPBACK_SHARED_BUFFER_SIZE));
+            }
+            else
+            {
+                DPF(D_ERROR, ("Failed to allocate LAMA Loopback buffer."));
+                InterlockedDecrement(&CMiniportWaveRT::g_LamaLoopbackClientCount); 
+                ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+            }
+        }
+        KeReleaseSpinLock(&CMiniportWaveRT::g_LamaLoopbackInitLock, oldIrql);
+        
+        if (!NT_SUCCESS(ntStatus))
+        {
+            return ntStatus; // Return if LAMA buffer allocation failed
+        }
+    }
+
 
     //
     // Init class data members
@@ -3422,6 +3505,31 @@ exit:
     return ntStatus;
 }
 
+//=============================================================================
+// CMiniportWaveRT LAMA Loopback helper implementations
+//=============================================================================
+#pragma code_seg() // Ensure these are in non-paged code if called at DISPATCH_LEVEL
+BOOL CMiniportWaveRT::IsLamaLoopbackRender() const
+{
+    if (m_pMiniportPair && m_pMiniportPair->WaveMiniport.Name)
+    {
+        // Use _wcsicmp for case-insensitive comparison if PortFilterNameDeviceExtension could have different casing.
+        // For this specific case, assuming exact match from lamaloopbackminipairs.h
+        return (wcscmp(m_pMiniportPair->WaveMiniport.Name, L"WaveLamaLoopbackRender") == 0);
+    }
+    return FALSE;
+}
+
+BOOL CMiniportWaveRT::IsLamaLoopbackCapture() const
+{
+    if (m_pMiniportPair && m_pMiniportPair->WaveMiniport.Name)
+    {
+        return (wcscmp(m_pMiniportPair->WaveMiniport.Name, L"WaveLamaLoopbackCapture") == 0);
+    }
+    return FALSE;
+}
+
+
 // ISSUE-2014/10/20 Add synchronization mechanism throughout this class
 // ISSUE-2014/10/20 Add comment headers and commenting throughout
 #pragma code_seg("PAGE")
@@ -3912,3 +4020,26 @@ Exit:
 #pragma code_seg()
 
 
+//=============================================================================
+// CMiniportWaveRT LAMA Loopback helper implementations
+//=============================================================================
+#pragma code_seg() // Ensure these are in non-paged code if called at DISPATCH_LEVEL
+BOOL CMiniportWaveRT::IsLamaLoopbackRender() const
+{
+    if (m_pMiniportPair && m_pMiniportPair->WaveMiniport.Name)
+    {
+        // Use _wcsicmp for case-insensitive comparison if PortFilterNameDeviceExtension could have different casing.
+        // For this specific case, assuming exact match from lamaloopbackminipairs.h
+        return (wcscmp(m_pMiniportPair->WaveMiniport.Name, L"WaveLamaLoopbackRender") == 0);
+    }
+    return FALSE;
+}
+
+BOOL CMiniportWaveRT::IsLamaLoopbackCapture() const
+{
+    if (m_pMiniportPair && m_pMiniportPair->WaveMiniport.Name)
+    {
+        return (wcscmp(m_pMiniportPair->WaveMiniport.Name, L"WaveLamaLoopbackCapture") == 0);
+    }
+    return FALSE;
+}

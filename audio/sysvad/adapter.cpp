@@ -26,6 +26,7 @@ Abstract:
 
 #include "simple.h"
 #include "minipairs.h"
+#include "lamaloopbackminipairs.h" // For LAMA Loopback
 #ifdef SYSVAD_BTH_BYPASS
 #include "bthhfpminipairs.h"
 #endif // SYSVAD_BTH_BYPASS

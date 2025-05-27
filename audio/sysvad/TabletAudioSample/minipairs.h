@@ -12,6 +12,8 @@ Abstract:
 
 --*/
 
+#include "lamaloopbackminipairs.h" // For LamaLoopbackRenderMiniports, LamaLoopbackCaptureMiniports
+
 #ifndef _SYSVAD_MINIPAIRS_H_
 #define _SYSVAD_MINIPAIRS_H_
 
@@ -513,6 +515,7 @@ PENDPOINT_MINIPAIR  g_RenderEndpoints[] =
     &SpeakerHpMiniports,
     &HdmiMiniports,
     &SpdifMiniports,
+    &LamaLoopbackRenderMiniports // Added LAMA Loopback Render
 };
 
 #define g_cRenderEndpoints  (SIZEOF_ARRAY(g_RenderEndpoints))
@@ -528,6 +531,7 @@ PENDPOINT_MINIPAIR  g_CaptureEndpoints[] =
     &MicArray1Miniports,
     &MicArray2Miniports,
     &MicArray3Miniports,
+    &LamaLoopbackCaptureMiniports // Added LAMA Loopback Capture
 };
 
 #define g_cCaptureEndpoints (SIZEOF_ARRAY(g_CaptureEndpoints))
@@ -539,4 +543,3 @@ PENDPOINT_MINIPAIR  g_CaptureEndpoints[] =
 #define g_MaxMiniports  ((g_cRenderEndpoints + g_cCaptureEndpoints) * 2)
 
 #endif // _SYSVAD_MINIPAIRS_H_
-
