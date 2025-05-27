@@ -17,7 +17,7 @@ Environment:
 --*/
 
 #include "public.h"
-#include "cpp_utils.h"
+#include "cpp_utils.h" // This likely contained scope_exit, which is being removed.
 
 #ifndef __INTELLISENSE__
 #include "driver.tmh"
@@ -30,19 +30,26 @@ void AudioCodecDriverUnload(
 {
     PAGED_CODE();
 
-    if (!Driver)
-    {
-        ASSERT(FALSE);
-        return;
-    }
+    // WPP_CLEANUP is called from DriverEntry's cleanup path upon failure,
+    // or by the system calling this DriverUnload normally.
+    // Avoid double cleanup if DriverUnload is called after a failed DriverEntry.
+    // However, WPP_CLEANUP is generally safe to call multiple times if WPP_INIT_TRACING succeeded.
+    // The original scope_exit called WPP_CLEANUP *only on failure*.
+    // AudioCodecDriverUnload is for the *success path* unload.
+    // So, WPP_CLEANUP here is correct for normal unload.
 
-    WPP_CLEANUP(WdfDriverWdmGetDriverObject(Driver));
-
-    if (g_RegistryPath.Buffer != nullptr)
+    // The g_RegistryPath cleanup is also in DriverEntry's cleanup.
+    // If DriverEntry fails after allocating g_RegistryPath, it's cleaned there.
+    // If DriverEntry succeeds, this unload callback cleans it.
+    if (g_RegistryPath.Buffer != NULL)
     {
         ExFreePool(g_RegistryPath.Buffer);
         RtlZeroMemory(&g_RegistryPath, sizeof(g_RegistryPath));
     }
+    
+    // WPP_CLEANUP is usually the last thing.
+    WPP_CLEANUP(WdfDriverWdmGetDriverObject(Driver));
+
 
     return;
 }
@@ -81,27 +88,30 @@ Return Value:
 {
     WDF_DRIVER_CONFIG           wdfCfg;
     ACX_DRIVER_CONFIG           acxCfg;
-    WDFDRIVER                   driver;
+    WDFDRIVER                   driver = NULL; // Initialize to NULL
     NTSTATUS                    status = STATUS_SUCCESS;
     WDF_OBJECT_ATTRIBUTES       attributes;
 
     PAGED_CODE();
+    
+    // WPP_INIT_TRACING should be called early.
     WPP_INIT_TRACING(DriverObject, RegistryPath);
 
-    auto exit = scope_exit([&status, &DriverObject]() {
-        if (!NT_SUCCESS(status))
-        {
-            WPP_CLEANUP(DriverObject);
+    // Ensure g_RegistryPath is initialized for cleanup logic
+    // Note: g_RegistryPath is a global. If DriverEntry could be re-entered for the same driver load (highly unlikely for a standard driver),
+    // this might need protection or be handled differently. Assuming standard single-entry.
+    // The original scope_exit did not re-initialize g_RegistryPath.Buffer if already allocated,
+    // it only freed it on failure. The unload routine handles freeing on success.
+    // For safety in the cleanup block, ensure it's NULL before any allocation attempt.
+    g_RegistryPath.Buffer = NULL; 
+    g_RegistryPath.Length = 0;
+    g_RegistryPath.MaximumLength = 0;
 
-            if (g_RegistryPath.Buffer != nullptr)
-            {
-                ExFreePool(g_RegistryPath.Buffer);
-                RtlZeroMemory(&g_RegistryPath, sizeof(g_RegistryPath));
-            }
-        }
-        });
-
-    RETURN_NTSTATUS_IF_FAILED(CopyRegistrySettingsPath(RegistryPath));
+    status = CopyRegistrySettingsPath(RegistryPath);
+    if (!NT_SUCCESS(status)) {
+        // KdPrintEx for error: "LAMA: CopyRegistrySettingsPath failed %!STATUS!\n", status
+        goto cleanup;
+    }
 
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
 
@@ -111,7 +121,12 @@ Return Value:
     //
     // Create a framework driver object to represent our driver.
     //
-    RETURN_NTSTATUS_IF_FAILED(WdfDriverCreate(DriverObject, RegistryPath, &attributes, &wdfCfg, &driver));
+    status = WdfDriverCreate(DriverObject, RegistryPath, &attributes, &wdfCfg, &driver);
+    if (!NT_SUCCESS(status)) {
+        // KdPrintEx for error: "LAMA: WdfDriverCreate failed %!STATUS!\n", status
+        // 'driver' is not valid here, so no WDF object cleanup specific to 'driver' needed yet.
+        goto cleanup;
+    }
 
     //
     // Initializing the ACX driver configuration struct which contains size and flags
@@ -123,7 +138,34 @@ Return Value:
     // The driver calls this DDI in its DriverEntry callback after creating the WDF driver
     // object. ACX uses this call to apply any post driver settings.
     //
-    RETURN_NTSTATUS_IF_FAILED(AcxDriverInitialize(driver, &acxCfg));
+    status = AcxDriverInitialize(driver, &acxCfg);
+    if (!NT_SUCCESS(status)) {
+        // KdPrintEx for error: "LAMA: AcxDriverInitialize failed %!STATUS!\n", status
+        // If AcxDriverInitialize fails, WDF will still call AudioCodecDriverUnload during driver teardown,
+        // which will handle WPP_CLEANUP. WdfDriverCreate succeeded, so the WDFDRIVER object exists.
+        // The original scope_exit logic was simpler and didn't call AcxDriverUninitialize.
+        // We are replicating the original scope_exit's cleanup items.
+        goto cleanup;
+    }
 
-    return status;
+    // If all successful
+    // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "LAMA: DriverEntry successful.\n"));
+    return STATUS_SUCCESS; 
+
+cleanup:
+    // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: DriverEntry failed with status %!STATUS!\n", status));
+
+    // This cleanup path is taken only if an operation *after* WPP_INIT_TRACING fails.
+    if (g_RegistryPath.Buffer != NULL) { 
+        ExFreePool(g_RegistryPath.Buffer);
+        RtlZeroMemory(&g_RegistryPath, sizeof(g_RegistryPath)); 
+    }
+
+    // WPP_CLEANUP is called if WPP_INIT_TRACING was called.
+    // If WdfDriverCreate failed, DriverObject is still valid.
+    WPP_CLEANUP(DriverObject);
+
+    return status; // Return the actual failure code
 }
+
+[end of audio/Lama/ACX/DriverV2/AudioCodec/Driver/Driver.cpp]

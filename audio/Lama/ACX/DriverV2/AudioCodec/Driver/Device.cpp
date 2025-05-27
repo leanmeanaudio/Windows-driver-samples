@@ -16,8 +16,14 @@ Environment:
 
 --*/
 
-#include <wdm.h>
-#include <windef.h>
+// Wrap kernel headers in extern "C" for C++ compatibility
+extern "C" {
+#include <ntddk.h> // For Zw* functions and other core kernel definitions
+// wdm.h is typically included by ntddk.h or is a subset.
+// If wdm.h was needed distinctly and not pulled in by ntddk.h, it would go here too.
+}
+
+#include <windef.h> // Basic Windows type definitions, often pulled in by other headers
 #include "public.h" // Contains CODEC_DEVICE_CONTEXT definition
 #include <devguid.h>
 #include <wdmguid.h> 
@@ -25,7 +31,7 @@ Environment:
 #include <mmsystem.h>
 #include <ksmedia.h>
 #include "streamengine.h"
-#include "DriverSettings.h"
+#include "DriverSettings.h" // Contains LAMAConnect GUIDs and other settings
 #include "LAMAConnectShared.h" // Contains LAMA_CONNECT_SHARED_BUFFER definition
 
 #ifndef __INTELLISENSE__
@@ -33,7 +39,8 @@ Environment:
 #endif
 
 // Declare the symbolic link name for LAMAConnect device interface
-DECLARE_CONST_UNICODE_STRING(symbolicLinkName, L"\\DosDevices\\LAMAConnect0");
+// Commented out as per instructions, will be declared locally in Codec_EvtBusDeviceAdd
+// DECLARE_CONST_UNICODE_STRING(symbolicLinkName, L"\\DosDevices\\LAMAConnect0");
 
 UNICODE_STRING g_RegistryPath = { 0 };      // This is used to store the registry settings path for the driver
 
@@ -131,6 +138,7 @@ Return Value:
     PCODEC_DEVICE_CONTEXT               devCtx;
     WDF_PNPPOWER_EVENT_CALLBACKS        pnpPowerCallbacks;
     WDF_IO_QUEUE_CONFIG                 queueConfig;
+    UNICODE_STRING                      symbolicLinkName; // Moved to local scope
 
 
     PAGED_CODE();
@@ -202,6 +210,9 @@ Return Value:
         // KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "LAMA: WdfDeviceCreateDeviceInterface failed %!STATUS!\n", status));
         return status;
     }
+    
+    // Initialize symbolicLinkName locally
+    RtlInitUnicodeString(&symbolicLinkName, L"\\DosDevices\\LAMAConnect0");
 
     // Create Symbolic Link for LAMAConnect Device Interface
     status = WdfDeviceCreateSymbolicLink(

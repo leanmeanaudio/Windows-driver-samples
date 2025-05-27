@@ -31,17 +31,16 @@ extern "C" {
 #include <ntddk.h>
 #include <ntstrsafe.h>
 #include <ntintsafe.h>
-#include "Trace.h"
+#include "Trace.h" // Usually specific to the driver/project
 
 #include <wdf.h>
 #include <acx.h>
 
-// Forward declare LAMA_CONNECT_SHARED_BUFFER if its definition is in LAMAConnectShared.h
-// and LAMAConnectShared.h is not/cannot be included here directly.
-// However, it's better if LAMAConnectShared.h is included before this file
-// or this struct definition includes LAMAConnectShared.h if it's self-contained.
-// For now, assuming LAMAConnectShared.h will be included by files that use this header.
-typedef struct _LAMA_CONNECT_SHARED_BUFFER LAMA_CONNECT_SHARED_BUFFER, *PLAMA_CONNECT_SHARED_BUFFER;
+// Include LAMAConnectShared.h for the definition of LAMA_CONNECT_SHARED_BUFFER
+// This is necessary because CODEC_DEVICE_CONTEXT uses PLAMA_CONNECT_SHARED_BUFFER.
+// Ensure LAMAConnectShared.h is self-contained and does not create circular dependencies.
+// Typically, LAMAConnectShared.h would only contain type definitions and constants.
+#include "LAMAConnectShared.h" 
 
 
 #define PAGED_CODE_SEG __declspec(code_seg("PAGE"))
@@ -65,7 +64,7 @@ typedef struct _CODEC_DEVICE_CONTEXT {
     PLAMA_CONNECT_SHARED_BUFFER SharedBuffer;    // Pointer to the mapped shared buffer
     HANDLE                  SharedMemoryHandle; // Handle to the shared memory section
     PVOID                   SharedMemoryBase;   // Base address of the mapped shared memory
-    HANDLE                  CompletionEventHandle; // Renamed to avoid conflict
+    HANDLE                  CompletionEventHandle; 
     BOOLEAN                 LamaClientRegistered; // Flag if a LAMA client is active
     UINT32                  LamaSampleRate;
     UINT32                  LamaBufferSizeFrames; // To be clear it's in frames
@@ -136,7 +135,7 @@ typedef struct _CODECMC_DEVICE_CONTEXT
 // Multicircuit codec driver prototypes.
 //
 EVT_WDF_DRIVER_DEVICE_ADD CodecMc_EvtBusDeviceAdd;
-DRIVER_INITIALIZE DriverEntry;
+// DRIVER_INITIALIZE DriverEntry; // Already defined above for CODEC
 EVT_WDF_DRIVER_UNLOAD AudioCodecMcDriverUnload;
 
 //
