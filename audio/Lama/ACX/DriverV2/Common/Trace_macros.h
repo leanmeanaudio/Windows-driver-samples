@@ -1,5 +1,5 @@
 #pragma once
-
+#include <ntdef.h> // For BOOL and other NTSTATUS definitions
 #include <stdarg.h>         // for va_start, etc.
 
 #pragma region Tracing level definitions

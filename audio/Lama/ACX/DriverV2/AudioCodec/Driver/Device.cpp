@@ -18,9 +18,8 @@ Environment:
 
 // Wrap kernel headers in extern "C" for C++ compatibility
 extern "C" {
-#include <ntddk.h> // For Zw* functions and other core kernel definitions
-// wdm.h is typically included by ntddk.h or is a subset.
-// If wdm.h was needed distinctly and not pulled in by ntddk.h, it would go here too.
+#include <ntdef.h> // Ensure basic NT types are defined with C linkage first
+#include <wdm.h> // Use wdm.h for comprehensive WDM driver definitions
 }
 
 #include <windef.h> // Basic Windows type definitions, often pulled in by other headers
@@ -31,6 +30,29 @@ extern "C" {
 #include <mmsystem.h>
 #include <ksmedia.h>
 #include "streamengine.h"
+
+// Explicit forward declarations for Zw* functions to ensure C linkage
+extern "C" {
+    NTSYSAPI
+    NTSTATUS
+    NTAPI
+    ZwCreateEvent (
+        PHANDLE EventHandle,
+        ACCESS_MASK DesiredAccess,
+        POBJECT_ATTRIBUTES ObjectAttributes,
+        EVENT_TYPE EventType,
+        BOOLEAN InitialState
+        );
+
+    NTSYSAPI
+    NTSTATUS
+    NTAPI
+    ZwSetEvent (
+        HANDLE EventHandle,
+        PLONG PreviousState
+        );
+}
+
 #include "DriverSettings.h" // Contains LAMAConnect GUIDs and other settings
 #include "LAMAConnectShared.h" // Contains LAMA_CONNECT_SHARED_BUFFER definition
 

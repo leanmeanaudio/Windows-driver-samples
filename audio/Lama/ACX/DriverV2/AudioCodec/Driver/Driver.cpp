@@ -18,9 +18,9 @@ Environment:
 
 #include "public.h"
 #include "cpp_utils.h" // This likely contained scope_exit, which is being removed.
+#include "Driver.tmh" // For WPP Tracing
 
 #ifndef __INTELLISENSE__
-#include "driver.tmh"
 #endif
 
 _Use_decl_annotations_
@@ -167,4 +167,3 @@ cleanup:
 
     return status; // Return the actual failure code
 }
-
